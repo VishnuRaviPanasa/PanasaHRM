@@ -51,9 +51,16 @@ const psql = (args, input) => {
   });
 };
 
-const query = (sql) => psql(['-tAq', '-c', sql]).trim();
+// psql emits CRLF row separators on Windows, so a per-row value keeps a trailing CR and
+// compares unequal to the same value computed here. Strip CR from the whole output.
+const query = (sql) => psql(['-tAq', '-c', sql]).split(String.fromCharCode(13)).join('').trim();
 
-const sha256 = (s) => createHash('sha256').update(s, 'utf8').digest('hex');
+// Normalise line endings before hashing. A Windows checkout has CRLF and a Linux/CI
+// checkout has LF, so hashing raw bytes makes the SAME migration report drift on every
+// CI run. The checksum must describe the content, not the platform that checked it out.
+const CR = String.fromCharCode(13);
+const sha256 = (s) =>
+  createHash('sha256').update(s.split(CR).join(''), 'utf8').digest('hex');
 
 const migrations = () => {
   if (!existsSync(MIGRATIONS_DIR)) return [];

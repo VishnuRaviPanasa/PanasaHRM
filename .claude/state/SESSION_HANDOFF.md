@@ -1,8 +1,8 @@
 # Session Handoff
 
 **Last updated:** 2026-09-08
-**Last session did:** Task 5 (requirements docs) and the first half of Phase 2 - dev stack,
-baseline migration and migration runner, **all verified against real PostgreSQL 18.6**.
+**Last session did:** Task 5, Phase 2 database foundation, and the configuration model behind the
+company settings screen. **24 DB checks + 19 hook checks passing against real PostgreSQL 18.6.**
 
 ## What exists now
 
@@ -67,15 +67,27 @@ baseline migration and migration runner, **all verified against real PostgreSQL 
   (DEC-012), `psql`-only so it works before `npm install` (DEC-013). **Drift detection tested by
   editing an applied migration and confirming it refuses.**
 - `testing/db/0001_baseline.verify.sql` - **13 adversarial checks, all passing.**
+- `infrastructure/db/migrations/0002_configuration.sql` - the settings-screen model.
+  `attendance_policy` and `employment_policy` are **effective-dated** (ADR-0019); `org_setting`
+  is mutable. Seeded with HR's confirmed values. `fn_attendance_policy_asof(date)` resolves the
+  version in force AS OF the date being computed.
+- `testing/db/0002_configuration.verify.sql` - **11 more checks, all passing**, including proof
+  that changing policy today does NOT change what a 2021 date resolves to.
 
 Commands: `npm run db:up` · `db:status` · `db:migrate` · `db:verify` · `db:down`
 
-## Two bugs found by running it, not by reading it
+## Four bugs found by running it, not by reading it
 
-1. `fn_block_mutation` used `format('%s ... %', ...)` - an invalid specifier. It only surfaced
-   when the trigger actually fired.
-2. The PG18 image refuses to start if the volume mounts at `/var/lib/postgresql/data`. It must
+1. `fn_block_mutation` used `format('%s ... %', ...)` - an invalid specifier, surfacing only when
+   the trigger actually fired.
+2. The PG18 image refuses to start if the volume mounts at `/var/lib/postgresql/data`; it must
    mount at `/var/lib/postgresql` (DEC-010).
+3. Migration checksums hashed raw bytes, so CRLF vs LF made the same migration report drift on
+   every CI run (DEC-014).
+4. `psql` row output keeps a trailing CR on Windows, so a stored checksum never compared equal to
+   the recomputed one (DEC-015).
+
+Both 3 and 4 are the same CRLF class in different places. Worth remembering on this machine.
 
 ## Exact next action
 

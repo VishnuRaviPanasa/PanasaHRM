@@ -1,6 +1,6 @@
 # Architecture Decision Records
 
-18 ADRs, **all currently `Proposed`**. Only a human may set one to Accepted; no agent may.
+19 ADRs, **all currently `Proposed`**. Only a human may set one to Accepted; no agent may.
 Once Accepted a file is immutable and `.claude/hooks/guard-adr.mjs` refuses edits - supersede it
 with a new ADR instead.
 
@@ -24,6 +24,7 @@ with a new ADR instead.
 | [0016](0016-effort-granularity-and-cost.md) | Integer minutes; no cost on the effort row | Storing cost leaks salary to project managers by arithmetic |
 | [0017](0017-work-log-privacy-posture.md) | Purpose-bound, not a productivity signal | An honest log is only possible when it is not graded |
 | [0018](0018-standalone-application.md) | No dependency on any existing system | Zero coupling, at the price of some duplicate data entry |
+| [0019](0019-configuration-model.md) | Effective-dated policy vs mutable settings | A mutable settings row would silently rewrite history on every recompute |
 
 ## Accepting an ADR
 
