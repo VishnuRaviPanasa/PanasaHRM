@@ -4,7 +4,7 @@ Reviewed at every slice close. Anything still open after two slices gets escalat
 
 | ID | Item | Why it matters | Owner | Review by |
 |---|---|---|---|---|
-| OR-01 | **Handbook contradictions - C3 and C8 RESOLVED 2026-09-08.** Remaining: C1 (sandwich rule), C2 (notice period), C4 (probation length), C5 (carry-forward expiry), C6 (comp-off validity start), C7 (no overtime policy), C12 (accrual during maternity) | These no longer block *starting* leave and attendance - they block finishing them | Human (HR) | Before Phase 6 completes |
+| OR-01 | **Handbook contradictions - no longer blockers.** C3 and C8 answered by HR; C1, C2, C4, C5, C6, C12 are now **settings with badged defaults** (DEC-019/020). Only **C7** remains genuinely absent - there is no overtime policy to configure from | 16 fields carry engineering defaults badged `unconfirmed`. Nothing is blocked, but a badged value must not be presented as settled policy | Human (HR) | Confirm via the settings screen |
 | OR-08 | **Two residual sub-questions from the C3/C8 answers**: (a) is the 6-month cap window calendar halves or rolling? (b) should `full_day_minutes` be 465 rather than 480, so the 15-min grace does not cost half a day? Defaults chosen for both; each is a one-line change | Wrong defaults would be quietly wrong rather than loudly wrong | Human (HR) | Before Phase 8 |
 | ~~OR-02~~ | ~~2026/2027 holiday calendars missing~~ **RESOLVED 2026-09-08** - 2026 recorded from live GreytHR in `docs/requirements/holiday-calendar-2026.md`. 2027 still outstanding (H-06) | - | - | Closed |
 | OR-03 | **No named legal/compliance contact** for DPDP sign-off | DPDP compliance is currently an accepted risk with no owner | Human | Before go-live |

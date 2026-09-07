@@ -35,7 +35,7 @@ Single prioritised list. Phase tags follow the roadmap in the plan (section 38).
 
 | # | Item | Blocked on |
 |---|---|---|
-| B1 | Leave engine | **PARTLY UNBLOCKED** - C3 resolved. C1/C2/C4/C5/C6 still needed to finish |
+| ~~B1~~ | ~~Leave engine~~ | **UNBLOCKED** - C1/C2/C4/C5/C6/C12 are now configurable with badged defaults (DEC-019) |
 | ~~B2~~ | ~~Attendance derivation~~ | **UNBLOCKED** - C8 resolved: grace 15min, half-day 4h, full day 8h |
 | ~~B3~~ | ~~Realistic leave/attendance test data~~ | **UNBLOCKED** - 2026 calendar recorded in `docs/requirements/holiday-calendar-2026.md`; seed it in Phase 2 |
 | B4 | DPDP compliance sign-off | No named legal contact (OR-03) |

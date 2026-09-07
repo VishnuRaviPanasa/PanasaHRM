@@ -18,6 +18,38 @@ computed, reported on, and possibly paid.
 
 So the screen does not offer **Save**. It offers **Change with effect from**.
 
+## Configurable vs answerable - the distinction that decides scope
+
+Not everything that *could* be a setting *should* be. Two kinds of thing get confused:
+
+- **A value** - a number, a flag, a choice between well-defined options. Making it configurable
+  is nearly free, and it should be.
+- **A behaviour** - a different computation shape. Making it configurable means building and
+  testing every branch, when HR will only ever use one.
+
+Almost every open handbook question turned out to be a value, which is why they are now settings
+rather than blockers. The exception is **C4**: `probation_accrual_method` is three genuinely
+different accrual algorithms, and each is real work.
+
+It is still configurable, for a reason that matters more than the cost: **HR cannot choose
+between these in the abstract.** "Segmented vs annual-capped" is jargon. So the screen must show
+the arithmetic (see below).
+
+## The safeguard: unconfirmed fields
+
+Making a value configurable does not make it correct. It moves the risk from *"the developer
+guessed"* to *"HR never opened the screen, and the engineering default silently became policy"* -
+which is worse, because it looks settled.
+
+Every policy row therefore carries `unconfirmed_fields`: the columns whose value is an
+engineering default rather than a human decision. The screen **badges them**, and any report
+built on them must say so rather than presenting the number as authoritative. A database trigger
+rejects a field name that does not exist, so a typo cannot silently remove a badge.
+
+Currently badged (16 fields): attendance full-day threshold and both overtime fields; all three
+probation fields; CL and SL sandwich rule, notice days and cap window; CL carry-forward expiry
+and additivity; CO lot expiry basis; ML accrual during leave.
+
 ## Two tabs, because there are two classes of setting (ADR-0019)
 
 ### Tab 1: Policy - effective-dated
@@ -37,7 +69,13 @@ So the screen does not offer **Save**. It offers **Change with effect from**.
 | Leave | CL / SL per year | 12 / 12 | 6 / 6 on probation, pro-rated |
 | Leave | Usage cap | 6 CL + 6 SL per 6 months, **warn** | Warns, never blocks. Not a balance constraint |
 | Leave | CL carry-forward cap | 6, after 1 year service | |
-| Leave | Comp-off validity | 3 months | |
+| Leave | Comp-off validity | 3 months | Basis (worked / approved / earned date) is **C6, badged** |
+| Leave | Sandwich rule | None | **C1, badged.** none / holidays / week-offs / both |
+| Leave | Advance notice | 2 days | **C2, badged.** Handbook says both 1 week and 2 days |
+| Leave | Carry-forward expiry | 12 months | **C5, badged** |
+| Leave | Accrual during maternity | Yes | **C12, badged** |
+| Employment | Probation accrual method | Segmented | **C4, badged.** See below |
+| Employment | Confirmation top-up | Immediate | **C4, badged** |
 
 Each row shows **current value**, **effective from**, and a **history** link.
 
@@ -75,6 +113,22 @@ feature flags. Plain edit, audited, no version history.
 
 7. **Unknown is not zero.** `probation_months` is NULL. The screen shows "Not set - see C4", and
    any calculation depending on it refuses rather than assuming.
+
+## The probation field needs live arithmetic, not a dropdown
+
+`probation_accrual_method` has three options, and their names are meaningless to HR. The screen
+must compute a worked example as the option changes:
+
+> **For an employee joining 15 March with a 6-month probation, 2026 casual leave entitlement:**
+> - **Segmented** - probation rate over the probation period, confirmed rate after: **6.5 days**
+> - **Annual, capped** - confirmed rate across the year, usage capped while on probation: **9.6 days**
+> - **Annual at probation rate** - uplift only next leave year: **4.8 days**
+
+Nearly double between the extremes, for the same person. Presented this way it is a question HR
+can answer in seconds; presented as three enum names it is a question nobody can answer at all.
+
+The same applies, less dramatically, to the cap window: show *"an employee who used 6 CL in June
+is warned again from 1 July (calendar) or from 1 December (rolling)"*.
 
 ## The warning HR needs to see on the full-day field
 
