@@ -17,7 +17,12 @@
     "format:check": "prettier --check .",
     "typecheck": "echo 'no workspaces yet - added in Phase 2'",
     "lint": "echo 'no workspaces yet - added in Phase 2'",
-    "test": "echo 'no workspaces yet - added in Phase 2'"
+    "test": "echo 'no workspaces yet - added in Phase 2'",
+    "db:up": "docker compose -f infrastructure/compose/docker-compose.dev.yml up -d",
+    "db:down": "docker compose -f infrastructure/compose/docker-compose.dev.yml down",
+    "db:status": "node scripts/migrate.mjs status",
+    "db:migrate": "node scripts/migrate.mjs up",
+    "db:verify": "node scripts/migrate.mjs verify"
   },
   "devDependencies": {
     "prettier": "^3.3.3"

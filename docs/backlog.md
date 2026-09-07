@@ -16,15 +16,15 @@ Single prioritised list. Phase tags follow the roadmap in the plan (section 38).
 | # | Task | Who |
 |---|---|---|
 | T3a | **Accept the ADRs** - read and set Status to Accepted, one at a time. 0002, 0005, 0006 and 0015 are the expensive ones to reverse | Human |
-| T5 | Move plan Appendix A into `docs/requirements/` as versioned docs | Claude |
+| ~~T5~~ | ~~Move Appendix A into docs/requirements~~ **DONE** | - |
 
 ## Next - Phase 2 (Foundation)
 
 | # | Task |
 |---|---|
-| T6 | Docker Compose dev stack (postgres 18, redis 7, minio, adminer) |
-| T7 | Migration runner, baseline migration, Drizzle mirror, drift detection |
-| T8 | `audit_log` (monthly partitions) + `outbox_events` + drain worker |
+| ~~T6~~ | ~~Docker Compose dev stack~~ **DONE - verified running** |
+| ~~T7~~ | ~~Migration runner + drift detection~~ **DONE - verified. Drizzle mirror pending (needs npm install)** |
+| T8 | ~~audit + outbox schema~~ **DONE + verified**. Drain **worker** still pending (needs the NestJS app) |
 | T9 | NestJS bootstrap: Zod-validated config, typed errors, RFC 9457, request IDs, OpenAPI, health endpoints |
 | T10 | Observability: OpenTelemetry, pino with redaction, Prometheus, Grafana/Loki/Tempo |
 | T11 | Test harness: Vitest + Testcontainers against real Postgres 18 |

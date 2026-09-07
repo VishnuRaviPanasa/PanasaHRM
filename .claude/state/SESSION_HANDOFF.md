@@ -1,8 +1,8 @@
 # Session Handoff
 
 **Last updated:** 2026-09-08
-**Last session did:** Tasks 3 and 4 - 18 ADRs (all Proposed) and all 10 `ai/context/` files.
-Before that: Task 1 (skeleton + harness), the 2026 holiday calendar, and Task 2 (the review gate).
+**Last session did:** Task 5 (requirements docs) and the first half of Phase 2 - dev stack,
+baseline migration and migration runner, **all verified against real PostgreSQL 18.6**.
 
 ## What exists now
 
@@ -55,16 +55,42 @@ Before that: Task 1 (skeleton + harness), the 2026 holiday calendar, and Task 2 
 - `docs/requirements/greythr-current-state.md` - what GreytHR covers today. Scope intelligence
   only; **no dependency** (D5).
 
+## Phase 2 so far - VERIFIED, not just written
+
+- `infrastructure/compose/docker-compose.dev.yml` - postgres 18 / redis 7 / minio / adminer.
+  **Confirmed running.** Ports default to a high range (55432 etc, DEC-009) because a local
+  PostgreSQL owns 5432 on this machine.
+- `infrastructure/db/migrations/0001_baseline.sql` - extensions, `schema_migration`,
+  `outbox_event`, `audit_event` (monthly partitions, current + 3 ahead), `audit_column_policy`,
+  append-only triggers, `fn_ensure_month_partition`. **Applied clean to a fresh DB.**
+- `scripts/migrate.mjs` - status / up / verify. Forward-only (DEC-011), checksum-enforced
+  (DEC-012), `psql`-only so it works before `npm install` (DEC-013). **Drift detection tested by
+  editing an applied migration and confirming it refuses.**
+- `testing/db/0001_baseline.verify.sql` - **13 adversarial checks, all passing.**
+
+Commands: `npm run db:up` · `db:status` · `db:migrate` · `db:verify` · `db:down`
+
+## Two bugs found by running it, not by reading it
+
+1. `fn_block_mutation` used `format('%s ... %', ...)` - an invalid specifier. It only surfaced
+   when the trigger actually fired.
+2. The PG18 image refuses to start if the volume mounts at `/var/lib/postgresql/data`. It must
+   mount at `/var/lib/postgresql` (DEC-010).
+
 ## Exact next action
 
-**Human action first: accept the ADRs** (T3a). Read them and set Status to Accepted one at a
-time. Until then everything downstream rests on Proposed decisions.
+**Human action still outstanding: accept the ADRs** (T3a). Everything built so far rests on
+decisions that are still `Proposed`.
 
-Then **Task 5**: move plan Appendix A into `docs/requirements/` as versioned documents, carrying
-C1-C12 through as explicit open questions.
+Then finish Phase 2, in this order:
 
-Then **Phase 2 (T6 onward)**: Docker Compose dev stack, migration runner + drift detection,
-audit/outbox, NestJS bootstrap, observability, test harness, CI gates.
+1. **T9 NestJS bootstrap** - `npm install` first (the registry IS reachable; only git DNS is
+   blocked in the sandbox). Zod-validated config, typed error hierarchy, RFC 9457 filter,
+   request-id middleware, OpenAPI, `/health/live` + `/health/ready`.
+2. **T8b the outbox drain worker** - needs the app to exist.
+3. **T7b the Drizzle mirror** of `0001_baseline.sql`, plus schema-drift detection.
+4. **T11 test harness** - Vitest + Testcontainers. Docker works here, so this is testable.
+5. **T10 observability**, **T12 CI**, **T13 ESLint + boundaries**.
 
 ## Traps and notes for the next session
 
