@@ -30,6 +30,8 @@ Single prioritised list. Phase tags follow the roadmap in the plan (section 38).
 |---|---|---|
 | B1 | Leave engine specification | Handbook contradictions C1-C6 (OR-01) |
 | B2 | Attendance derivation | C7, C8 - no grace period or half-day threshold defined (OR-01) |
-| B3 | Realistic leave/attendance test data | 2026 holiday calendar (OR-02) |
+| ~~B3~~ | ~~Realistic leave/attendance test data~~ | **UNBLOCKED** - 2026 calendar recorded in `docs/requirements/holiday-calendar-2026.md`; seed it in Phase 2 |
 | B4 | DPDP compliance sign-off | No named legal contact (OR-03) |
 | B5 | Push to remote | Sandbox has no network (OR-04) |
+| B6 | Holiday election cap and retroactive-holiday handling | H-01..H-06 (OR-06) |
+| B7 | Retire-or-coexist decision for GreytHR | O12 / OR-07 - needed before Phase 7, not before Phase 1-5 |

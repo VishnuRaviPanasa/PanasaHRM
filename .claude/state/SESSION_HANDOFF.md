@@ -1,7 +1,8 @@
 # Session Handoff
 
 **Last updated:** 2026-09-08
-**Last session did:** Task 1 - repository skeleton and Claude Code harness.
+**Last session did:** Task 1 - repository skeleton and Claude Code harness, plus
+recorded the 2026 holiday calendar and GreytHR current state from live sources.
 
 ## What exists now
 
@@ -25,6 +26,13 @@
 - No ESLint config (deferred until there is TypeScript to lint and module paths for
   `eslint-plugin-boundaries` to enforce)
 - No application code, no migrations, no dependencies installed
+
+## Requirements captured so far
+
+- `docs/requirements/holiday-calendar-2026.md` - the real 2026 calendar from GreytHR ESS.
+  11 fixed + 6 optional. Closes OR-02. Raises H-01..H-06.
+- `docs/requirements/greythr-current-state.md` - what GreytHR covers today. Scope intelligence
+  only; **no dependency** (D5).
 
 ## Exact next action
 
