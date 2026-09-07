@@ -61,6 +61,56 @@
     "allow": "Read-only inspection and non-destructive build/test commands run without prompting.",
     "ask": "Two classes sit here deliberately: (1) anything that moves history or dependencies, and (2) packages/authz and db/migrations - the two places where a silent mistake is most expensive, where one keystroke of confirmation is proportionate.",
     "deny": "Hard blocks. `docker compose down -v` is denied because it destroys the dev database volume - an easy and irreversible accident. `.mcp.json` is denied so MCP servers are only ever added by a deliberate human edit (see plan section 26).",
-    "hooks": "Intentionally absent in Task 1. Hooks arrive in Task 2 with their scripts, so they can be tested the moment they are added rather than failing silently."
+    "hooks": "Four hooks, each shipping with its script (DEC-003). guard-commit combines the secret, migration and authz checks in one process to stay inside the sub-10s commit budget - a slow commit gate is what drives people to --no-verify, which this repo denies. Deferred: a Stop-hook typecheck (no TypeScript exists yet) and a push gate requiring a /gate artifact (needs code to gate). Each hook script documents what it prevents and how to remove it safely."
+  },
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "if": "Bash(git commit *)",
+            "command": "node ${CLAUDE_PROJECT_DIR}/.claude/hooks/guard-commit.mjs",
+            "timeout": 30,
+            "statusMessage": "Checking staged changes for secrets, migrations, authz..."
+          }
+        ]
+      },
+      {
+        "matcher": "Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node ${CLAUDE_PROJECT_DIR}/.claude/hooks/guard-adr.mjs",
+            "timeout": 10,
+            "statusMessage": "Checking ADR immutability..."
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node ${CLAUDE_PROJECT_DIR}/.claude/hooks/track-dirty.mjs",
+            "timeout": 5
+          }
+        ]
+      }
+    ],
+    "SubagentStop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node ${CLAUDE_PROJECT_DIR}/.claude/hooks/log-subagent.mjs",
+            "timeout": 5
+          }
+        ]
+      }
+    ]
   }
 }

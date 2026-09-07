@@ -1,8 +1,8 @@
 # Session Handoff
 
 **Last updated:** 2026-09-08
-**Last session did:** Task 1 - repository skeleton and Claude Code harness, plus
-recorded the 2026 holiday calendar and GreytHR current state from live sources.
+**Last session did:** Task 2 - the review gate, tested. (Task 1 skeleton + harness and the 2026
+holiday calendar / GreytHR current state were the sessions before.)
 
 ## What exists now
 
@@ -18,11 +18,22 @@ recorded the 2026 holiday calendar and GreytHR current state from live sources.
 - Governance stubs: `docs/adr/0000-template.md`, `docs/governance/decisions.md`,
   `ai/REGISTRY.md`, `docs/backlog.md`.
 
+## Task 2 added
+
+- `docs/standards/agent-output-contract.md` (envelope **v2**) and `severity-vocabulary.md`
+- **7 agents** - thin adapters in `.claude/agents/`, full specs in `ai/agents/`
+- **5 skills** - `session-brief` (auto, with live `!` injection), `review`, `check-authz`,
+  `slice`, `close-slice` (all manual-only)
+- **4 hooks** with scripts: commit guard (secrets / migrations / authz), ADR guard, dirty
+  tracker, subagent log
+- **`testing/hooks/guards.test.mjs` - 19 adversarial cases, all passing.** Run it after any
+  change to a guard: `node testing/hooks/guards.test.mjs`
+
 ## What does NOT exist yet
 
 - No ADRs with content (Task 3 - ADRs 0001-0017 are drafted in the plan, not yet written here)
-- No `ai/context/*.md` files
-- No agents, commands, skills or hooks
+- No `ai/context/*.md` files - **agents will correctly refuse and escalate if asked to work
+  without them**, which is intended behaviour, not a bug
 - No ESLint config (deferred until there is TypeScript to lint and module paths for
   `eslint-plugin-boundaries` to enforce)
 - No application code, no migrations, no dependencies installed
@@ -36,9 +47,12 @@ recorded the 2026 holiday calendar and GreytHR current state from live sources.
 
 ## Exact next action
 
-Run Task 2 from `docs/backlog.md`: author the review gate (agents, commands, skills, hooks,
-`docs/standards/agent-output-contract.md`, `docs/standards/severity-vocabulary.md`), then
-**test each rail by trying to break it**.
+Run **Task 4** from `docs/backlog.md`: write `ai/context/*.md`, starting with
+`temporal-data-rules.md` and `rbac-rules.md`. The agents already reference these files and will
+escalate without them, so they are the binding constraint on doing any real review.
+
+Task 3 (write ADRs 0001-0017) can run in parallel - it needs a human to Accept each one, and
+`guard-adr.mjs` will enforce immutability from that moment.
 
 ## Traps and notes for the next session
 
