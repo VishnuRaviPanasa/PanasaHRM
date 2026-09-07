@@ -2,7 +2,7 @@
 
 **Source:** Employee Handbook, HR Policy Ver. 3 (`PAN/ISMS/HRD/PO/2`, issued 2 Jan 2025, author
 Tresa Ann, approved Rajesh Thaikoottathil), sections 4.1–4.9 and 8.1.1.
-**Status:** baseline established; **six ambiguities unresolved (C1–C6)** — see the bottom.
+**Status:** baseline established. **C3 RESOLVED by HR 2026-09-08.** C1, C2, C4, C5, C6, C12 open.
 
 > **Nothing here may be resolved by assumption.** Where the handbook is silent or contradicts
 > itself, that is recorded as an open question, not filled in with a sensible-looking default.
@@ -80,11 +80,35 @@ These follow from the policy and are design constraints, not restatements:
    notice).
 4. **Probation entitlement is a policy predicate on employment status**, not a separate leave type.
 
+## C3 — RESOLVED (HR, 2026-09-08)
+
+The handbook wording is an error. The rule is a **MAXIMUM**, and it **warns rather than blocks**.
+
+| Parameter | Value |
+|---|---|
+| Cap | **6 CL and 6 SL per 6 months** |
+| Enforcement | **Warn** — surface it to the requester and the approver; do **not** reject |
+| Applies to | CL and SL independently, not a combined pool of 12 |
+
+**Engine shape.** Two new `leave_policy` columns: `period_cap_days NUMERIC(5,2)` and
+`period_cap_months SMALLINT`, with enforcement `warn`. The warning is recorded on the request so
+the approver's decision to proceed is auditable — a soft rule that leaves no trace is a rule
+nobody can later show was applied.
+
+Because it warns rather than blocks, it is **not** a balance constraint and must **not** reduce
+`leave_account.available`. It is a policy check evaluated at submission, alongside the
+`ck_leave_account_no_overdraw` constraint which remains the only hard limit.
+
+**Still open (a sub-question C3 did not cover):** is the six-month window **calendar halves**
+(Jan–Jun, Jul–Dec) or **rolling** from the request date? Calendar halves align with the Jan–Dec
+leave year already established and are far cheaper to compute and explain. **Proceeding with
+calendar halves unless told otherwise.**
+
 ## Open questions — blocking
 
 | Ref | Question | Why it blocks |
 |---|---|---|
-| **C3** | §4.9: *"a **minimum** of 6 sick leaves and 6 casual leaves will only be allowed for an employee every 6 months."* Read literally this is incoherent. It almost certainly means a **maximum** of 6+6 per half-year | **Changes the available balance for every employee.** The highest-impact ambiguity in the handbook |
+| ~~C3~~ | ~~minimum or maximum~~ — **RESOLVED, see below** | — |
 | **C1** | §4.5 states the sandwich rule *and cancels it* in consecutive sentences | Changes how many days a request consumes |
 | **C2** | Advance notice: 1 week (§2.4) or 2 working days (§4.9)? | Request validation |
 | **C4** | **Probation length is never stated.** At confirmation, does entitlement jump 6→12, and is the uplift pro-rated from joining or from confirmation? | Affects every new joiner's balance |

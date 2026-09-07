@@ -1,7 +1,6 @@
 # Attendance and Working Time - Requirements
 
-**Source:** Employee Handbook v3, sections 1.1.3 and 2. **Status:** baseline established;
-**C7 and C8 unresolved and blocking.**
+**Source:** Employee Handbook v3, sections 1.1.3 and 2. **Status:** baseline established. **C8 RESOLVED by HR 2026-09-08.** C7 (overtime policy) open.
 
 ## Working time
 
@@ -73,20 +72,53 @@ in 2025 and at least 3 of 6 in 2026.
    theoretical: "Election - Kerala" was added to the 2026 calendar by government order.
 5. **Attendance and work logs reconcile but never derive from each other** (ADR-0015).
 
+## C8 - RESOLVED (HR, 2026-09-08)
+
+| Parameter | Value |
+|---|---|
+| **Grace period** | **15 minutes.** Late if the first punch is after 09:15 |
+| **Half-day threshold** | **4 hours** worked |
+| **Minimum full day** | **8 hours** worked |
+
+Derived day classification, given a standard 09:00-18:00 shift with a 1-hour break:
+
+| worked_minutes | Status | payable_day_fraction |
+|---|---|---|
+| >= 480 (8h) | `present` | 1.0 |
+| 240-479 (4h to <8h) | `half_day` | 0.5 |
+| < 240 (<4h) | `absent` | 0.0 |
+
+`late_by_minutes` is computed from 09:15, not 09:00 - the grace is absorbed, not merely reported.
+
+### One interaction that needs a decision before this is implemented
+
+The standard day is 09:00-18:00 **minus a 1-hour break = exactly 8 hours effective**. So a
+strict `worked_minutes >= 480` full-day threshold means **anyone who uses any part of the grace
+period falls short of a full day**: arriving 09:10 and leaving 18:00 yields 7h50m, which under
+the table above classifies as a **half day**.
+
+That is almost certainly not intended - it would make the 15-minute grace worthless, since using
+it costs half a day's pay.
+
+**Proceeding with `full_day_minutes = 465` (7h45m = 8h minus the 15-minute grace)** as the
+configured threshold, so an employee who arrives within grace and stays to shift end gets a full
+day. `8 hours` remains the stated nominal figure and the comp-off proof requirement.
+
+The alternative - classifying a full day by presence (in within grace AND out at/after shift
+end) rather than by duration - is defensible but harder to explain and harder to apply to
+flexible arrangements. **Confirm the 465 default with HR; it is a one-line change either way.**
+
 ## Open questions - blocking
 
 | Ref | Question | Why it blocks |
 |---|---|---|
-| **C8** | **No grace period and no half-day threshold exist anywhere in the handbook.** §1.1.3.2.2 says *any* arrival after 09:00 is late - enforced literally, that flags most of the company most days | **Attendance derivation cannot run.** It needs both numbers to classify a day |
+| ~~C8~~ | ~~no grace period or half-day threshold~~ - **RESOLVED, see above** | - |
 | **C7** | The overtime policy is referenced but absent | Overtime cannot be paid |
 | **H-04** | A holiday falling on a Saturday or Sunday - observed on the next working day, lost, or converted to comp-off? | No 2026 holiday does, so the rule is untested and undefined |
 | Q8 | Biometric device vendor and export interface | Ingestion adapter. CSV import is built first regardless |
 
-### The specific numbers needed from HR
+### Residual questions
 
-1. **Grace period**: how many minutes after 09:00 before an arrival is recorded as late?
-2. **Half-day threshold**: how many hours worked constitute a half day rather than a full day or
-   an absence?
-3. **Minimum full day**: how many hours for a full day?
-
-Three numbers. Without them the derivation job cannot assign a status to a single day.
+1. **Confirm `full_day_minutes = 465`** rather than 480, so the grace period is usable (see above)
+2. **C7** - the overtime policy still does not exist
+3. **H-04** - a holiday falling on a weekend

@@ -28,6 +28,10 @@ the **Kerala Shops and Commercial Establishments Act**.
 | Working hours | 09:00-18:00 Mon-Fri, 1h break => **8h effective** |
 | Week off | Saturday, Sunday |
 | Notice period | **90 days.** No CL during notice; SL taken during notice **extends** it. Buyout = 3 months salary |
+| **Leave usage cap** | **Maximum 6 CL and 6 SL per 6 months**, enforced as a **warning, not a block** (HR, 2026-09-08). Not a balance constraint |
+| **Grace period** | **15 minutes** - late if the first punch is after 09:15 (HR, 2026-09-08) |
+| **Half-day threshold** | **4 hours** worked (HR, 2026-09-08) |
+| **Full day** | **8 hours** nominal. Configured threshold is **465 min (7h45)** so the grace period remains usable - pending confirmation |
 | Salary | Monthly, on the **10th**. No advance salary |
 | Appraisal | **Annually on each employee's joining anniversary** - rolling per-employee cycles, not one org-wide window |
 | Gratuity | After **5 years continuous service**, per the Payment of Gratuity Act |
@@ -51,20 +55,22 @@ These are engineering defaults chosen so work can proceed, **not** established f
 
 | Ref | Assumption | Why it is uncertain |
 |---|---|---|
-| **C3** | The "6 CL and 6 SL every 6 months" clause is a **maximum**, not a minimum | The handbook says "a minimum of ... will only be allowed", which read literally is incoherent. **The two readings give different balances for every employee** |
+
 | **C1** | Sandwich leave is **OFF** | Section 4.5 states the rule and cancels it in consecutive sentences |
 | **C2** | Advance notice is **2 working days** | Section 2.4 says one week; section 4.9 says two working days |
 | **C4** | Probation length, and whether the 6->12 uplift pro-rates from joining or confirmation | Probation length is never stated anywhere in the handbook |
 | **C5** | Carried CL is additive to the fresh 12 (max 18) and expires after 12 months | Expiry is unstated |
 | **C6** | Comp-off validity runs from the **worked date** | Could be earned, approved or worked date |
 | **C7** | Overtime is captured but **unpaid** | The handbook defers to "the overtime policy", which does not exist |
-| **C8** | No grace period and no half-day threshold are defined | Section 1.1.3.2.2 says *any* arrival after 09:00 is late. **Attendance derivation cannot run without these two numbers** |
+
 | **C12** | Leave accrues during maternity leave | Unstated |
 | **H-01** | Optional-holiday election cap for 2026 | Screenshot shows 3 applied of 6; handbook said 2 of 5 for 2025 |
 | **H-03** | Leave already approved on a date that later becomes a holiday | Refund or not - unstated, and it is a real ledger reversal path |
 | **H-04** | A holiday falling on a Saturday/Sunday | No 2026 holiday does, so the rule is untested and undefined |
 
-**C3 and C8 are the two that block real work.** Both are one-line answers from HR.
+~~C3 and C8~~ **both RESOLVED by HR on 2026-09-08** - see the CONFIRMED table above.
+The remaining ASSUMED items are real but none of them blocks starting the leave or attendance
+engines; they block *finishing* them.
 
 ## Payroll (Phase 10) - statutory areas, not encoded rules
 
