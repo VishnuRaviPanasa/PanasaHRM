@@ -1,0 +1,25 @@
+{
+  "name": "panasa-hrm",
+  "version": "0.0.0",
+  "private": true,
+  "description": "PanasaHRM - HR management platform for Panasa Technology Pvt. Ltd.",
+  "license": "UNLICENSED",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "engines": {
+    "node": ">=24.0.0",
+    "npm": ">=11.0.0"
+  },
+  "scripts": {
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "typecheck": "echo 'no workspaces yet - added in Phase 2'",
+    "lint": "echo 'no workspaces yet - added in Phase 2'",
+    "test": "echo 'no workspaces yet - added in Phase 2'"
+  },
+  "devDependencies": {
+    "prettier": "^3.3.3"
+  }
+}

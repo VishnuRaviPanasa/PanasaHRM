@@ -1,0 +1,22 @@
+# Normalise to LF in the repository. Windows checkouts may use CRLF locally,
+# but anything executed inside a Linux container MUST be LF or it breaks.
+* text=auto eol=lf
+
+# Never touched by line-ending conversion
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.pdf binary
+*.woff binary
+*.woff2 binary
+*.zip binary
+
+# Executed in containers - LF is mandatory, not cosmetic
+*.sh text eol=lf
+*.sql text eol=lf
+*.mjs text eol=lf
+Dockerfile text eol=lf
+*.yml text eol=lf
+*.yaml text eol=lf

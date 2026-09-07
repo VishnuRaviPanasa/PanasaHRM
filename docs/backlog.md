@@ -1,0 +1,35 @@
+# Backlog
+
+Single prioritised list. Phase tags follow the roadmap in the plan (section 38).
+
+## Now - Phase 1 (Architecture and ADRs)
+
+| # | Task | Notes |
+|---|---|---|
+| T2 | **Author the review gate** | 7 subagents, slash commands, skills, hooks, `agent-output-contract.md` (envelope v2), `severity-vocabulary.md`, populate `ai/REGISTRY.md`. **Then try to break each rail and confirm it holds.** |
+| T3 | **Write ADRs 0001-0017** | Drafted in plan section 13. Human accepts; no agent may mark one Accepted |
+| T4 | **Write `ai/context/*.md`** | Especially `temporal-data-rules.md` and `rbac-rules.md` - precise enough to implement from |
+| T5 | **Write `docs/requirements/` from the Employee Handbook** | Plan Appendix A is the source. Carry C1-C12 through as explicit open questions |
+
+## Next - Phase 2 (Foundation)
+
+| # | Task |
+|---|---|
+| T6 | Docker Compose dev stack (postgres 18, redis 7, minio, adminer) |
+| T7 | Migration runner, baseline migration, Drizzle mirror, drift detection |
+| T8 | `audit_log` (monthly partitions) + `outbox_events` + drain worker |
+| T9 | NestJS bootstrap: Zod-validated config, typed errors, RFC 9457, request IDs, OpenAPI, health endpoints |
+| T10 | Observability: OpenTelemetry, pino with redaction, Prometheus, Grafana/Loki/Tempo |
+| T11 | Test harness: Vitest + Testcontainers against real Postgres 18 |
+| T12 | CI gates 1 and 2, branch protection |
+| T13 | ESLint + `eslint-plugin-boundaries` (DEC-002) |
+
+## Blocked - needs a human
+
+| # | Item | Blocked on |
+|---|---|---|
+| B1 | Leave engine specification | Handbook contradictions C1-C6 (OR-01) |
+| B2 | Attendance derivation | C7, C8 - no grace period or half-day threshold defined (OR-01) |
+| B3 | Realistic leave/attendance test data | 2026 holiday calendar (OR-02) |
+| B4 | DPDP compliance sign-off | No named legal contact (OR-03) |
+| B5 | Push to remote | Sandbox has no network (OR-04) |

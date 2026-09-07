@@ -1,0 +1,46 @@
+# dependencies
+node_modules/
+.npm/
+
+# build output
+dist/
+build/
+.next/
+out/
+*.tsbuildinfo
+
+# env & secrets - NEVER commit
+.env
+.env.*
+!.env.example
+secrets/
+*.pem
+*.key
+*.p12
+*.pfx
+
+# test & coverage
+coverage/
+.nyc_output/
+playwright-report/
+test-results/
+
+# logs
+*.log
+npm-debug.log*
+
+# os / editor
+.DS_Store
+Thumbs.db
+*.swp
+.idea/
+.vscode/*
+!.vscode/extensions.json
+
+# claude local state (session-scoped, not shared)
+.claude/settings.local.json
+.claude/state/*.jsonl
+
+# local data volumes
+.data/
+tmp/
