@@ -6,10 +6,17 @@ Single prioritised list. Phase tags follow the roadmap in the plan (section 38).
 
 | # | Task | Notes |
 |---|---|---|
-| T2 | **Author the review gate** | 7 subagents, slash commands, skills, hooks, `agent-output-contract.md` (envelope v2), `severity-vocabulary.md`, populate `ai/REGISTRY.md`. **Then try to break each rail and confirm it holds.** |
-| T3 | **Write ADRs 0001-0017** | Drafted in plan section 13. Human accepts; no agent may mark one Accepted |
-| T4 | **Write `ai/context/*.md`** | Especially `temporal-data-rules.md` and `rbac-rules.md` - precise enough to implement from |
+| ~~T2~~ | ~~Author the review gate~~ **DONE** | 7 subagents, slash commands, skills, hooks, `agent-output-contract.md` (envelope v2), `severity-vocabulary.md`, populate `ai/REGISTRY.md`. **Then try to break each rail and confirm it holds.** |
+| ~~T3~~ | ~~Write ADRs~~ **DONE - 18 written, all Proposed. Human must Accept** | Drafted in plan section 13. Human accepts; no agent may mark one Accepted |
+| ~~T4~~ | ~~Write ai/context~~ **DONE - all 10 files** | Especially `temporal-data-rules.md` and `rbac-rules.md` - precise enough to implement from |
 | T5 | **Write `docs/requirements/` from the Employee Handbook** | Plan Appendix A is the source. Carry C1-C12 through as explicit open questions |
+
+## Now - human action required
+
+| # | Task | Who |
+|---|---|---|
+| T3a | **Accept the ADRs** - read and set Status to Accepted, one at a time. 0002, 0005, 0006 and 0015 are the expensive ones to reverse | Human |
+| T5 | Move plan Appendix A into `docs/requirements/` as versioned docs | Claude |
 
 ## Next - Phase 2 (Foundation)
 

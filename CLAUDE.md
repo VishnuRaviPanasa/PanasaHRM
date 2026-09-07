@@ -106,17 +106,18 @@ The gate derives the class from **changed file paths**, not from your assertion.
 | `ai/REGISTRY.md` | Adding, removing or revalidating an agent or skill |
 | `docs/governance/decisions.md` | Recording a non-architectural decision (DEC-NNN) |
 
-> **Several files in this table do not exist yet** — Phase 1 is unfinished.
-> `.claude/state/SESSION_HANDOFF.md` lists exactly which. **If a file listed here is missing,
-> say so and stop. Never invent its contents.** A fabricated standard is worse than a missing
-> one, because the next session will treat it as authoritative.
+> All `ai/context/` and `docs/standards/` files above now exist. Two referenced elsewhere do
+> **not** yet — `packages/authz/authz-matrix.yaml` and `docs/privacy/data-inventory.md` — because
+> both arrive with Phase 2 code. **If a file you are told to read is missing, say so and stop.
+> Never invent its contents.** A fabricated standard is worse than a missing one, because the
+> next session will treat it as authoritative.
 
 ## Session protocol
 
 **Start:** read this file, then `.claude/state/CURRENT_SLICE.md` and
 `.claude/state/SESSION_HANDOFF.md`. Work **one slice** to completion.
 
-**End:** update `SESSION_HANDOFF.md` with what was completed, what is in flight, and the
+**End:** update `.claude/state/SESSION_HANDOFF.md` with what was completed, what is in flight, and the
 **exact next action**. Record any decision as an ADR or a DEC entry.
 
 ## When to STOP and ask

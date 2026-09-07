@@ -1,8 +1,8 @@
 # Session Handoff
 
 **Last updated:** 2026-09-08
-**Last session did:** Task 2 - the review gate, tested. (Task 1 skeleton + harness and the 2026
-holiday calendar / GreytHR current state were the sessions before.)
+**Last session did:** Tasks 3 and 4 - 18 ADRs (all Proposed) and all 10 `ai/context/` files.
+Before that: Task 1 (skeleton + harness), the 2026 holiday calendar, and Task 2 (the review gate).
 
 ## What exists now
 
@@ -29,11 +29,21 @@ holiday calendar / GreytHR current state were the sessions before.)
 - **`testing/hooks/guards.test.mjs` - 19 adversarial cases, all passing.** Run it after any
   change to a guard: `node testing/hooks/guards.test.mjs`
 
+## Tasks 3 and 4 added
+
+- **18 ADRs**, `docs/adr/0001`-`0018`, all **Proposed**. `docs/adr/README.md` indexes them with
+  why each is load-bearing. **A human must Accept them** - no agent may, and the guard enforces
+  immutability from that moment.
+- **All 10 `ai/context/` files.** The agents' required-context now resolves, so real review is
+  possible for the first time.
+- ADR-0018 was added beyond the plan's 0001-0017: the standalone/no-dependency constraint (D5)
+  is genuinely architectural and deserved a record.
+
 ## What does NOT exist yet
 
-- No ADRs with content (Task 3 - ADRs 0001-0017 are drafted in the plan, not yet written here)
-- No `ai/context/*.md` files - **agents will correctly refuse and escalate if asked to work
-  without them**, which is intended behaviour, not a bug
+- `packages/authz/authz-matrix.yaml` and `docs/privacy/data-inventory.md` - both arrive with
+  Phase 2 code; `CLAUDE.md` says so explicitly so nobody invents them
+- No application code, no migrations, no dependencies installed
 - No ESLint config (deferred until there is TypeScript to lint and module paths for
   `eslint-plugin-boundaries` to enforce)
 - No application code, no migrations, no dependencies installed
@@ -47,12 +57,14 @@ holiday calendar / GreytHR current state were the sessions before.)
 
 ## Exact next action
 
-Run **Task 4** from `docs/backlog.md`: write `ai/context/*.md`, starting with
-`temporal-data-rules.md` and `rbac-rules.md`. The agents already reference these files and will
-escalate without them, so they are the binding constraint on doing any real review.
+**Human action first: accept the ADRs** (T3a). Read them and set Status to Accepted one at a
+time. Until then everything downstream rests on Proposed decisions.
 
-Task 3 (write ADRs 0001-0017) can run in parallel - it needs a human to Accept each one, and
-`guard-adr.mjs` will enforce immutability from that moment.
+Then **Task 5**: move plan Appendix A into `docs/requirements/` as versioned documents, carrying
+C1-C12 through as explicit open questions.
+
+Then **Phase 2 (T6 onward)**: Docker Compose dev stack, migration runner + drift detection,
+audit/outbox, NestJS bootstrap, observability, test harness, CI gates.
 
 ## Traps and notes for the next session
 
