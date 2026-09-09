@@ -50,7 +50,7 @@ DC="$COMPOSE -f $COMPOSE_FILE --env-file $ENV_FILE"
 if [ ! -f "$ENV_FILE" ]; then
   echo "Missing $ENV_FILE." >&2
   echo "  cp $ENV_TEMPLATE $ENV_FILE" >&2
-  echo "  # then set PGPASSWORD, HRM_MINIO_ACCESS_KEY and HRM_MINIO_SECRET_KEY" >&2
+  echo "  # then set the owner/app DB passwords, the MinIO keys and the Redis password" >&2
   exit 1
 fi
 
@@ -59,7 +59,7 @@ fi
 # A plain string rather than an array: `${#arr[@]}` on an empty array is an unbound-variable
 # error under `set -u` on bash 4.2, which is still what some LTS hosts ship.
 missing=""
-for var in PGUSER PGPASSWORD PGDATABASE HRM_MINIO_ACCESS_KEY HRM_MINIO_SECRET_KEY; do
+for var in HRM_PG_OWNER_USER HRM_PG_OWNER_PASSWORD HRM_PG_APP_USER HRM_PG_APP_PASSWORD PGDATABASE HRM_MINIO_ACCESS_KEY HRM_MINIO_SECRET_KEY HRM_REDIS_PASSWORD; do
   value="$(grep -E "^${var}=" "$ENV_FILE" | tail -n1 | cut -d= -f2- || true)"
   [ -n "$value" ] || missing="$missing $var"
 done
@@ -99,7 +99,7 @@ fi
 # own output on screen, before anything is restarted.
 echo "==> Applying migrations"
 $DC up -d postgres
-$DC run --rm migrate up
+$DC run --rm migrate
 
 echo "==> Starting the stack"
 $DC up -d

@@ -30,10 +30,6 @@ const config: NextConfig = {
 
   ...(basePath ? { basePath, assetPrefix: basePath } : {}),
 
-  // A traced, self-contained server for the runtime image - no `npm install` in the final
-  // stage, no dev dependencies on the production host.
-  output: 'standalone',
-
   // Trace from the REPOSITORY root, not apps/web. This is an npm-workspaces monorepo, so the
   // hoisted node_modules lives two levels up; without this Next roots the trace at apps/web and
   // the standalone bundle silently omits hoisted dependencies.

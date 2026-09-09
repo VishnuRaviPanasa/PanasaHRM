@@ -47,23 +47,38 @@ Then fill in the three required values, each with its own freshly generated secr
 
 | Variable | What it is |
 |---|---|
-| `PGPASSWORD` | The PostgreSQL role password. Used by the API **and** the migration runner |
+| `HRM_PG_OWNER_PASSWORD` | The PostgreSQL **owner** role. Creates the cluster, and what the migration runner and the seed connect with |
+| `HRM_PG_APP_PASSWORD` | What the **API** connects with. Should be least-privilege `hrm_app` — **but set it to the owner for now**, see below |
 | `HRM_MINIO_ACCESS_KEY` | MinIO root user (≥ 3 chars) |
 | `HRM_MINIO_SECRET_KEY` | MinIO root password (≥ 8 chars) |
+| `HRM_REDIS_PASSWORD` | Redis runs but nothing uses it yet (OR-21). Password it anyway |
+
+**The API must still connect as the owner.** Separating the roles is the point of migration 0008,
+and while the API is the owner it bypasses every grant including the Tier-1 revokes on the payslip
+tables (OR-29). But finding **P3-7** means the leave flow cannot run as `hrm_app` at all — the
+ledger trigger needs a grant the role lacks. So `HRM_PG_APP_*` are the owner's credentials today;
+the variables are separate so that fixing P3-7 is a config change, not a compose rewrite.
 
 ```bash
 openssl rand -base64 30 | tr -d '/+=' | cut -c1-32
 ```
 
 `prod.env` is gitignored. `deploy.sh` refuses to run if it is missing **or if any required value
-is blank** — an empty `PGPASSWORD` would otherwise bring PostgreSQL up on trust authentication.
+is blank** — an empty owner password would otherwise bring PostgreSQL up on trust authentication.
 
 > The file is `prod.env`, not `.env`, on purpose: writing to `.env*` is a Forbidden Action in
 > `CLAUDE.md` and the guard is worth more than the naming convention.
 
-**`PGPASSWORD` only creates the role on the very first boot**, when the `pgdata` volume is empty.
-Changing it later does not change the role's password — `ALTER ROLE hrm PASSWORD …`, then update
-the file.
+**The owner password only creates the role on the very first boot**, when the `pgdata` volume is
+empty. Changing it later does not change the role's password — `ALTER ROLE hrm PASSWORD …`, then
+update the file.
+
+### The session cookie
+
+`HRM_SECURE_COOKIES=true` drives **both** the cookie's `Secure` flag and its `__Host-` name prefix
+(ADR-0010). It must be true for anything reached over https. It is deliberately one switch and not
+two: a browser refuses a `Secure` cookie over plain HTTP *and* refuses a `__Host-` cookie without
+`Secure`, so a half-configured deployment fails loudly at login instead of quietly downgrading.
 
 ## 2. Deploy
 

@@ -1,4 +1,3 @@
-<<<<<<< HEAD
 # PanasaHRM production stack - Docker Compose on a single VM (ADR-0013).
 #
 #   host nginx (TLS :7777) --/panasa-hrm/-->  127.0.0.1:4787
@@ -9,9 +8,14 @@
 #                                          postgres :5432  <---------|
 #                                          minio    :9000  <---------'
 #
-# ONLY the edge nginx publishes a host port, and it publishes to 127.0.0.1 only. PostgreSQL and
-# MinIO are reachable on the compose network and nowhere else - never expose a database, or an
-# object store holding employee documents, to the LAN.
+# TOPOLOGY: this app does NOT own the host. The VM already runs several apps behind one nginx
+# that terminates TLS on :7777 and path-routes to loopback ports (/hr-agent/ is on 4767).
+# PanasaHRM takes 4787. So the edge nginx here speaks PLAIN HTTP on loopback and mounts no
+# certificate - TLS ends one hop upstream.
+#
+# ONLY the edge nginx publishes a host port, and only to 127.0.0.1. PostgreSQL, MinIO and Redis
+# are reachable on the compose network and nowhere else - never expose a database, or an object
+# store holding employee documents, to the LAN.
 #
 # Run it from the REPOSITORY ROOT (the build contexts are the repo root):
 #   ./deploy.sh
@@ -21,6 +25,11 @@
 #
 # Every secret below is ${VAR:?...} with no default, on purpose: a missing secret must stop the
 # deploy naming the variable, not start the stack on a development password.
+#
+# ON `build:` - ADR-0013 wants images built in CI and deployed by DIGEST, never built on the
+# production host. No CI exists yet (amendment (a), task T12), so they are built here and
+# `HRM_IMAGE_TAG` is the seam: when CI lands, delete the `build:` blocks and set the tag to the
+# released digest. Keeping both today is what makes the stack deployable at all.
 
 name: panasahrm
 
@@ -31,14 +40,22 @@ services:
     container_name: hrm-postgres
     restart: unless-stopped
     environment:
-      POSTGRES_USER: ${PGUSER:?set PGUSER in prod.env}
-      POSTGRES_PASSWORD: ${PGPASSWORD:?set PGPASSWORD in prod.env}
-      POSTGRES_DB: ${PGDATABASE:?set PGDATABASE in prod.env}
-      # Deterministic collation. A collation difference between environments silently reorders
-      # indexes and can corrupt unique constraints on text columns.
-      POSTGRES_INITDB_ARGS: "--locale=C.UTF-8 --encoding=UTF8"
+      POSTGRES_DB: ${PGDATABASE:-hrm}
+      POSTGRES_USER: ${HRM_PG_OWNER_USER:?set HRM_PG_OWNER_USER in prod.env}
+      POSTGRES_PASSWORD: ${HRM_PG_OWNER_PASSWORD:?set HRM_PG_OWNER_PASSWORD in prod.env}
+      # Two things, and both matter:
+      #   --locale/--encoding  deterministic collation. A collation difference between
+      #                        environments silently reorders indexes and can corrupt unique
+      #                        constraints on text columns.
+      #   --auth-host          scram-sha-256; the default would still allow md5.
+      POSTGRES_INITDB_ARGS: "--locale=C.UTF-8 --encoding=UTF8 --auth-host=scram-sha-256"
     command:
       - postgres
+      # The server runs UTC, which is what fn_business_date() documents and expects: it reads
+      # `now() AT TIME ZONE <org_setting company.timezone, default Asia/Kolkata>`, so it is
+      # immune to this setting. Pinning the server to Asia/Kolkata instead would make production
+      # disagree with docker-compose.dev.yml for anything that DOES touch CURRENT_DATE, silently.
+      # Leave it UTC; the business date comes from the function, never from the server clock.
       - -c
       - timezone=UTC
       - -c
@@ -48,13 +65,13 @@ services:
       - -c
       - shared_preload_libraries=pg_stat_statements
     volumes:
-      # DEC-010 / ADR-0013(c): PG18 mounts at /var/lib/postgresql, NOT .../data. The image then
-      # places the cluster in a major-version subdirectory, which is what makes a later
-      # `pg_upgrade --link` possible across the mount boundary. Mounting at .../data on 18+
-      # makes the container refuse to start.
+      # DEC-010 / ADR-0013(c): PG18 mounts at /var/lib/postgresql, NOT .../data. The image places
+      # the cluster in a major-version subdirectory, which is what makes a later
+      # `pg_upgrade --link` possible across the mount boundary. Mounting at .../data on 18+ makes
+      # the container refuse to start, reporting what looks like a version mismatch.
       #
-      # THE LIVE DATA PATH IS /var/lib/postgresql/18/docker. Any backup or restore must target
-      # it explicitly - this is the thing that is easy to get wrong at 3am.
+      # THE LIVE DATA PATH IS /var/lib/postgresql/18/docker. Any backup or restore must target it
+      # explicitly - this is the thing that is easy to get wrong at 3am.
       - pgdata:/var/lib/postgresql
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
@@ -65,7 +82,9 @@ services:
 
   # --------------------------------------------------------------------------------------
   minio:
-    image: minio/minio:latest
+    # Pinned to a release, not :latest. An object store holding employee documents must not
+    # change version because somebody happened to re-pull on a Tuesday.
+    image: minio/minio:RELEASE.2025-04-22T22-12-26Z
     container_name: hrm-minio
     restart: unless-stopped
     command: ["server", "/data", "--console-address", ":9001"]
@@ -83,8 +102,34 @@ services:
       start_period: 20s
 
   # --------------------------------------------------------------------------------------
-  # ADR-0013: migrations run as a SEPARATE ONE-SHOT CONTAINER, never on app boot. `api` waits
-  # for this to exit 0, so a failed migration means the API never starts against a half-applied
+  # Running but UNUSED by the application - sessions are still PostgreSQL rows (OR-21). Present
+  # so that switching to it is a configuration change rather than a redeploy of the stack.
+  redis:
+    image: redis:7-alpine
+    container_name: hrm-redis
+    restart: unless-stopped
+    command:
+      - redis-server
+      - --requirepass
+      - ${HRM_REDIS_PASSWORD:?set HRM_REDIS_PASSWORD in prod.env}
+      - --save
+      - "60"
+      - "1"
+      - --appendonly
+      - "no"
+    environment:
+      REDIS_PASSWORD: ${HRM_REDIS_PASSWORD}
+    volumes:
+      - redisdata:/data
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli -a \"$$REDIS_PASSWORD\" ping | grep -q PONG"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+
+  # --------------------------------------------------------------------------------------
+  # ADR-0013: migrations run as a SEPARATE ONE-SHOT CONTAINER, never on app boot. `api` waits for
+  # this to exit 0, so a failed migration means the API never starts against a half-applied
   # schema, instead of every replica racing to apply it.
   migrate:
     build:
@@ -93,16 +138,69 @@ services:
     image: panasahrm/migrate:${HRM_IMAGE_TAG:-local}
     container_name: hrm-migrate
     restart: "no"
-    command: ["up"]
+    command: ["node", "scripts/migrate.mjs", "up"]
     environment:
       PGHOST: postgres
       PGPORT: "5432"
-      PGUSER: ${PGUSER}
-      PGPASSWORD: ${PGPASSWORD}
-      PGDATABASE: ${PGDATABASE}
+      PGDATABASE: ${PGDATABASE:-hrm}
+      # Migrations run as the OWNER. This is the one place that is correct: creating tables,
+      # constraints and triggers requires it, and it is exactly why the application should not
+      # use the same role.
+      PGUSER: ${HRM_PG_OWNER_USER}
+      PGPASSWORD: ${HRM_PG_OWNER_PASSWORD}
     depends_on:
       postgres:
         condition: service_healthy
+
+  # --------------------------------------------------------------------------------------
+  # DEMO DATA. Behind a profile, so it CANNOT run on an ordinary deploy.
+  #
+  # `docker compose up -d` ignores a profiled service entirely. Loading demo data therefore takes
+  # an explicit, differently-shaped command:
+  #
+  #   docker compose -f docker-compose.prod.yml --env-file prod.env --profile seed run --rm seed
+  #
+  # That asymmetry IS the safety property. This seed is DESTRUCTIVE - it wipes and recreates every
+  # table it touches - so it must never be reachable by the command somebody types to restart the
+  # stack at 2am. Two guards must be opened deliberately, and both are visible here rather than
+  # buried in the script:
+  #
+  #   HRM_SEED_ALLOW_NONDEV  seed.mjs refuses any target that is not 127.0.0.1:55432. Inside
+  #                          compose the host is `postgres`, so it refuses by default - correct,
+  #                          and the override has to be stated.
+  #   HRM_DEMO_PASSWORD      every demo account shares one password. Left unset it is the value
+  #                          committed in the repository, which on a reachable host is a public
+  #                          credential. Required here so that cannot happen by omission.
+  #
+  # It runs as the OWNER: clearing effective-dated and append-only tables means disabling their
+  # triggers, which only the owner can do.
+  seed:
+    profiles: ["seed"]
+    build:
+      context: ../..
+      dockerfile: infrastructure/docker/migrate.Dockerfile
+    image: panasahrm/migrate:${HRM_IMAGE_TAG:-local}
+    container_name: hrm-seed
+    restart: "no"
+    command: ["node", "scripts/seed.mjs"]
+    environment:
+      PGHOST: postgres
+      PGPORT: "5432"
+      PGDATABASE: ${PGDATABASE:-hrm}
+      PGUSER: ${HRM_PG_OWNER_USER}
+      PGPASSWORD: ${HRM_PG_OWNER_PASSWORD}
+      HRM_SEED_ALLOW_NONDEV: i-understand
+      HRM_DEMO_PASSWORD: ${HRM_DEMO_PASSWORD:?set HRM_DEMO_PASSWORD - do not use the value committed in the repo}
+      HRM_MINIO_HOST: minio
+      HRM_MINIO_PORT: "9000"
+      HRM_MINIO_ACCESS_KEY: ${HRM_MINIO_ACCESS_KEY}
+      HRM_MINIO_SECRET_KEY: ${HRM_MINIO_SECRET_KEY}
+      HRM_DOC_BUCKET: ${HRM_DOC_BUCKET:-hrm-documents}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      minio:
+        condition: service_started
 
   # --------------------------------------------------------------------------------------
   api:
@@ -115,85 +213,30 @@ services:
     environment:
       NODE_ENV: production
       PORT: "4000"
+      # THE COOKIE. This one switch drives BOTH the `Secure` flag and the `__Host-` name prefix
+      # (apps/api/src/auth.ts). Without it the session cookie ships over TLS without Secure,
+      # which is a downgrade nobody sees. True for any https deployment - which is every
+      # deployment behind the host nginx.
+      HRM_SECURE_COOKIES: ${HRM_SECURE_COOKIES:-true}
       PGHOST: postgres
       PGPORT: "5432"
-      PGUSER: ${PGUSER}
-      PGPASSWORD: ${PGPASSWORD}
-      PGDATABASE: ${PGDATABASE}
+      PGDATABASE: ${PGDATABASE:-hrm}
+      # SHOULD NOT be the owner - the API holding a least-privilege role is the whole point of
+      # migration 0008, and while it connects as the owner it bypasses every grant, including the
+      # Tier-1 revokes protecting the payslip tables (OR-29).
+      #
+      # IT STILL HAS TO BE THE OWNER TODAY. Finding P3-7: the leave flow cannot run as `hrm_app`
+      # at all, because the ledger trigger needs a grant the role lacks. So set these to the
+      # owner credentials until P3-7 is fixed; the separate variables exist so that fix becomes a
+      # configuration change rather than a compose rewrite.
+      PGUSER: ${HRM_PG_APP_USER:?set HRM_PG_APP_USER in prod.env - see the P3-7 note}
+      PGPASSWORD: ${HRM_PG_APP_PASSWORD:?set HRM_PG_APP_PASSWORD in prod.env}
       HRM_MINIO_HOST: minio
       HRM_MINIO_PORT: "9000"
       HRM_MINIO_SSL: "false"        # in-network hop on the compose bridge; TLS ends at the host
       HRM_MINIO_ACCESS_KEY: ${HRM_MINIO_ACCESS_KEY}
       HRM_MINIO_SECRET_KEY: ${HRM_MINIO_SECRET_KEY}
       HRM_DOC_BUCKET: ${HRM_DOC_BUCKET:-hrm-documents}
-      # The session cookie IS served over TLS in this deployment (the host nginx terminates it),
-      # so it must carry Secure. The default stays false in code so local HTTP still works.
-      HRM_COOKIE_SECURE: ${HRM_COOKIE_SECURE:-true}
-=======
-# =============================================================================
-# ART HRM - production stack (ADR-0013: Docker Compose on a single VM)
-# =============================================================================
-#
-#   docker compose -f infrastructure/compose/docker-compose.prod.yml up -d
-#
-# EVERY SECRET IS REQUIRED, NOT DEFAULTED. The `${VAR:?...}` form makes compose
-# refuse to start when a value is missing, rather than silently falling back to
-# a development credential. There is deliberately no `.env.example` in this
-# repository - CLAUDE.md forbids committing any `.env*` file - so the full list
-# of variables and how to generate each one is in
-# docs/runbooks/deployment.md.
-#
-# IMAGES ARE REFERENCED BY TAG HERE FOR READABILITY. ADR-0013 requires deploying
-# by DIGEST (`image: art-hrm-api@sha256:...`), built in CI and never on the
-# production host. There is no CI yet (ADR-0013 amendment (a)), so the runbook
-# describes building on a build host and pushing digests. Pin the digests before
-# this is a real production deployment.
-#
-# WHAT IS NOT HERE, and is not an oversight:
-#   * No worker. Nothing in this build enqueues background work yet.
-#   * No observability stack. ADR-0013 wants one; OpenTelemetry is not wired.
-#   * No backup service. There is no backup script and no verified restore
-#     drill - ADR-0013 amendment (b) records that as the principal accepted risk
-#     with no control behind it. Do not treat this stack as durable until that
-#     exists.
-# =============================================================================
-
-name: art-hrm
-
-services:
-  # ---------------------------------------------------------------------------
-  # Edge. The ONLY container that publishes a port to the host.
-  # ---------------------------------------------------------------------------
-  nginx:
-    image: nginx:1.27-alpine
-    restart: unless-stopped
-    depends_on:
-      web:
-        condition: service_started
-      api:
-        condition: service_started
-    ports:
-      - "80:80"
-      - "443:443"
-    volumes:
-      - ./nginx/hrm.conf:/etc/nginx/conf.d/default.conf:ro
-      - ./nginx/hrm-proxy.inc:/etc/nginx/conf.d/hrm-proxy.inc:ro
-      # Certificates are mounted from the host, never baked into an image.
-      # Point HRM_TLS_DIR at a directory holding fullchain.pem and privkey.pem.
-      - ${HRM_TLS_DIR:?set HRM_TLS_DIR to the directory holding fullchain.pem and privkey.pem}:/etc/nginx/tls:ro
-    healthcheck:
-      test: ["CMD", "wget", "-qO-", "http://localhost/healthz"]
-      interval: 30s
-      timeout: 5s
-      retries: 3
-
-  # ---------------------------------------------------------------------------
-  # Application
-  # ---------------------------------------------------------------------------
-  api:
-    image: art-hrm-api:${HRM_IMAGE_TAG:?set HRM_IMAGE_TAG to the release being deployed}
-    restart: unless-stopped
->>>>>>> 2fab2724bfa0651580869e327ed808054853bd4b
     depends_on:
       postgres:
         condition: service_healthy
@@ -201,7 +244,6 @@ services:
         condition: service_started
       migrate:
         condition: service_completed_successfully
-<<<<<<< HEAD
     healthcheck:
       # /api/auth/me answers 401 without a session. ANY HTTP response proves the process is
       # listening and routing, which is what a liveness probe is for. There is no unauthenticated
@@ -222,11 +264,9 @@ services:
       context: ../..
       dockerfile: infrastructure/docker/web.Dockerfile
       args:
-        # Baked in at BUILD time - Next resolves basePath/assetPrefix during the build and no
-        # runtime variable can change it. Empty = served at the root of the published port.
-        # Set to /panasa-hrm when the host nginx path-routes (see DEPLOY.md).
+        # Both baked in at BUILD time - Next resolves basePath during the build, and serialises
+        # rewrites() into the routes manifest. Neither can be changed by restarting a container.
         NEXT_PUBLIC_BASE_PATH: ${NEXT_PUBLIC_BASE_PATH:-}
-        # Build-time for the same reason: `rewrites()` is evaluated by `next build`, not at boot.
         HRM_API_ORIGIN: http://api:4000
     image: panasahrm/web:${HRM_IMAGE_TAG:-local}
     container_name: hrm-web
@@ -235,13 +275,9 @@ services:
       NODE_ENV: production
       PORT: "3100"
       HOSTNAME: "0.0.0.0"
-      # Runtime copy of the build arg. Next itself does not need it (the value is already
-      # compiled in); the healthcheck below builds its probe path from it.
+      # Runtime copy of the build arg. Next does not need it (the value is already compiled in);
+      # the healthcheck below builds its probe path from it.
       NEXT_PUBLIC_BASE_PATH: ${NEXT_PUBLIC_BASE_PATH:-}
-      # Kept for parity with the build arg above; the value that actually takes effect is the
-      # one baked in at build time (see web.Dockerfile). Setting it here changes nothing on its
-      # own - it is here so the two cannot drift out of sight of each other.
-      HRM_API_ORIGIN: http://api:4000
     depends_on:
       api:
         condition: service_started
@@ -266,14 +302,14 @@ services:
       # result here, so nginx.conf.template becomes /etc/nginx/nginx.conf before nginx starts.
       NGINX_ENVSUBST_OUTPUT_DIR: /etc/nginx
       # The ONLY value substituted. Must match the web image's NEXT_PUBLIC_BASE_PATH exactly, or
-      # the API location silently stops matching and every API call takes a detour through Next.
+      # the API location silently stops matching and every API call detours through Next.
       HRM_BASE_PATH: ${NEXT_PUBLIC_BASE_PATH:-}
     volumes:
       - ../nginx/nginx.conf.template:/etc/nginx/templates/nginx.conf.template:ro
       - ../nginx/hrm_proxy_params:/etc/nginx/hrm_proxy_params:ro
     ports:
       # Loopback only. The host nginx terminates TLS on :7777 and reverse-proxies to this port.
-      # 4765/4766/4767 are already taken on this host, so PanasaHRM uses 4787.
+      # 4765/4766/4767 are already taken on that host, so PanasaHRM uses 4787.
       - "127.0.0.1:${HRM_PUBLISH_PORT:-4787}:80"
     depends_on:
       web:
@@ -285,194 +321,15 @@ services:
       interval: 15s
       timeout: 5s
       retries: 5
-=======
-    environment:
-      NODE_ENV: production
-      PORT: "4000"
-      # THE COOKIE. Without this the session cookie ships without `Secure` and
-      # without the __Host- prefix, which over TLS is a downgrade nobody sees.
-      HRM_SECURE_COOKIES: "true"
-      PGHOST: postgres
-      PGPORT: "5432"
-      PGDATABASE: ${HRM_PG_DATABASE:-hrm}
-      # NOT the owner. See the runbook: the API should hold a least-privilege
-      # role, and while it connects as the owner it bypasses every grant,
-      # including the Tier-1 revokes protecting the payslip tables (OR-29).
-      PGUSER: ${HRM_PG_APP_USER:?set HRM_PG_APP_USER}
-      PGPASSWORD: ${HRM_PG_APP_PASSWORD:?set HRM_PG_APP_PASSWORD}
-      HRM_MINIO_HOST: minio
-      HRM_MINIO_PORT: "9000"
-      HRM_MINIO_ACCESS_KEY: ${HRM_MINIO_ACCESS_KEY:?set HRM_MINIO_ACCESS_KEY}
-      HRM_MINIO_SECRET_KEY: ${HRM_MINIO_SECRET_KEY:?set HRM_MINIO_SECRET_KEY}
-      HRM_DOC_BUCKET: ${HRM_DOC_BUCKET:-hrm-documents}
-    expose:
-      - "4000"
-
-  web:
-    image: art-hrm-web:${HRM_IMAGE_TAG:?set HRM_IMAGE_TAG to the release being deployed}
-    restart: unless-stopped
-    depends_on:
-      - api
-    environment:
-      NODE_ENV: production
-      PORT: "3000"
-      HOSTNAME: "0.0.0.0"
-      # Only used if a request reaches Next's /api rewrite. In this stack nginx
-      # routes /api straight to the API, so the rewrite is a fallback.
-      HRM_API_ORIGIN: http://api:4000
-    expose:
-      - "3000"
-
-  # ---------------------------------------------------------------------------
-  # One-shot. Runs to completion before the API starts, and blocks the deploy
-  # if a migration fails or a checksum no longer matches.
-  # ---------------------------------------------------------------------------
-  migrate:
-    image: art-hrm-migrate:${HRM_IMAGE_TAG:?set HRM_IMAGE_TAG to the release being deployed}
-    restart: "no"
-    depends_on:
-      postgres:
-        condition: service_healthy
-    environment:
-      PGHOST: postgres
-      PGPORT: "5432"
-      PGDATABASE: ${HRM_PG_DATABASE:-hrm}
-      # Migrations run as the OWNER. This is the one place that is correct:
-      # creating tables, constraints and triggers requires it, and it is why the
-      # application must NOT use the same role.
-      PGUSER: ${HRM_PG_OWNER_USER:?set HRM_PG_OWNER_USER}
-      PGPASSWORD: ${HRM_PG_OWNER_PASSWORD:?set HRM_PG_OWNER_PASSWORD}
-    command: ["node", "scripts/migrate.mjs", "up"]
-
-  # ---------------------------------------------------------------------------
-  # DEMO DATA. Behind a profile, so it CANNOT run on an ordinary deploy.
-  # ---------------------------------------------------------------------------
-  #
-  # `docker compose up -d` ignores a profiled service entirely. Loading demo data
-  # therefore takes an explicit, differently-shaped command:
-  #
-  #     docker compose -f docker-compose.prod.yml --profile seed run --rm seed
-  #
-  # That asymmetry is the safety property. This seed is DESTRUCTIVE - it wipes
-  # and recreates every table it touches - so it must never be reachable by the
-  # command somebody types to restart the stack at 2am.
-  #
-  # Two guards have to be opened deliberately, and both are visible here rather
-  # than buried in the script:
-  #
-  #   HRM_SEED_ALLOW_NONDEV  the seed refuses any target that is not
-  #                          127.0.0.1:55432. Inside compose the host is
-  #                          `postgres`, so it refuses by default - correct, and
-  #                          the override has to be stated.
-  #   HRM_DEMO_PASSWORD      every demo account shares one password. Left unset
-  #                          it is the value committed in the repository, which
-  #                          on a reachable host is a public credential. Required
-  #                          here so that cannot happen by omission.
-  #
-  # It runs as the OWNER: clearing effective-dated and append-only tables means
-  # disabling their triggers, which only the owner can do. That is exactly the
-  # residual power the migrations concede to an owner, and exactly why the
-  # application must not be one.
-  seed:
-    profiles: ["seed"]
-    image: art-hrm-migrate:${HRM_IMAGE_TAG:?set HRM_IMAGE_TAG to the release being deployed}
-    restart: "no"
-    depends_on:
-      postgres:
-        condition: service_healthy
-      minio:
-        condition: service_started
-    environment:
-      PGHOST: postgres
-      PGPORT: "5432"
-      PGDATABASE: ${HRM_PG_DATABASE:-hrm}
-      PGUSER: ${HRM_PG_OWNER_USER:?set HRM_PG_OWNER_USER}
-      PGPASSWORD: ${HRM_PG_OWNER_PASSWORD:?set HRM_PG_OWNER_PASSWORD}
-      HRM_SEED_ALLOW_NONDEV: i-understand
-      HRM_DEMO_PASSWORD: ${HRM_DEMO_PASSWORD:?set HRM_DEMO_PASSWORD - do not use the value committed in the repo}
-      HRM_MINIO_HOST: minio
-      HRM_MINIO_PORT: "9000"
-      HRM_MINIO_ACCESS_KEY: ${HRM_MINIO_ACCESS_KEY:?set HRM_MINIO_ACCESS_KEY}
-      HRM_MINIO_SECRET_KEY: ${HRM_MINIO_SECRET_KEY:?set HRM_MINIO_SECRET_KEY}
-      HRM_DOC_BUCKET: ${HRM_DOC_BUCKET:-hrm-documents}
-    command: ["node", "scripts/seed.mjs"]
-
-  # ---------------------------------------------------------------------------
-  # Data. None of these publishes a port - they are reachable only on the
-  # compose network.
-  # ---------------------------------------------------------------------------
-  postgres:
-    image: postgres:18-alpine
-    restart: unless-stopped
-    environment:
-      POSTGRES_DB: ${HRM_PG_DATABASE:-hrm}
-      POSTGRES_USER: ${HRM_PG_OWNER_USER:?set HRM_PG_OWNER_USER}
-      POSTGRES_PASSWORD: ${HRM_PG_OWNER_PASSWORD:?set HRM_PG_OWNER_PASSWORD}
-      # scram-sha-256 for host connections; the default would allow md5.
-      POSTGRES_INITDB_ARGS: "--auth-host=scram-sha-256"
-      # Attendance and payroll derive dates from this. It must match
-      # fn_business_date()'s assumption or a punch lands on the wrong day.
-      TZ: Asia/Kolkata
-    volumes:
-      # /var/lib/postgresql, NOT .../data. PG18 changed this: the image places the
-      # cluster in a major-version SUBDIRECTORY of this path so `pg_upgrade --link`
-      # can work without crossing a mount boundary. Mounting .../data makes PG18
-      # refuse to start, reporting what looks like a version mismatch.
-      #
-      # docker-compose.dev.yml already carried this note. This file was written
-      # from scratch rather than from that one and reintroduced the bug, which the
-      # first `up` found immediately.
-      - pgdata:/var/lib/postgresql
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${HRM_PG_OWNER_USER} -d ${HRM_PG_DATABASE:-hrm}"]
-      interval: 10s
-      timeout: 5s
-      retries: 12
-    expose:
-      - "5432"
-
-  minio:
-    image: minio/minio:RELEASE.2025-04-22T22-12-26Z
-    restart: unless-stopped
-    command: server /data --console-address ":9001"
-    environment:
-      MINIO_ROOT_USER: ${HRM_MINIO_ACCESS_KEY:?set HRM_MINIO_ACCESS_KEY}
-      MINIO_ROOT_PASSWORD: ${HRM_MINIO_SECRET_KEY:?set HRM_MINIO_SECRET_KEY}
-    volumes:
-      - miniodata:/data
-    expose:
-      - "9000"
-      - "9001"
-
-  # Running but unused by the application - sessions are still PostgreSQL rows
-  # (OR-21). Present so the switch is a configuration change rather than a
-  # redeploy of the stack.
-  redis:
-    image: redis:7-alpine
-    restart: unless-stopped
-    command: ["redis-server", "--save", "60", "1", "--appendonly", "no"]
-    volumes:
-      - redisdata:/data
-    expose:
-      - "6379"
->>>>>>> 2fab2724bfa0651580869e327ed808054853bd4b
 
 volumes:
   pgdata:
   miniodata:
-<<<<<<< HEAD
+  redisdata:
 
 # WHAT IS DELIBERATELY NOT HERE
 #
-#   redis + a BullMQ worker - ADR-0013 names both and no code connects to either yet. An unused
-#   Redis is an unused password and an unused listener; it lands with the worker that needs it.
-#   ADR-0010 also makes Redis authoritative for the session record, which the API does not do
-#   yet (sessions live in PostgreSQL), so adding Redis now would imply a session migration too.
-#
-#   the observability stack - ADR-0013 names OpenTelemetry; nothing is instrumented yet.
-#
-#   backups - ADR-0013 amendment (b): there is no backup script, no restore runbook and no
-#   verified restore drill, and Phase 9 gates go-live on one. See DEPLOY.md, "Before go-live".
-=======
-  redisdata:
->>>>>>> 2fab2724bfa0651580869e327ed808054853bd4b
+#   the BullMQ worker - ADR-0013 names it and no code publishes a job yet.
+#   the observability stack - ADR-0013 names OpenTelemetry; nothing is instrumented.
+#   backups - ADR-0013 amendment (b): no backup script, no restore runbook, no verified restore
+#   drill, and Phase 9 gates go-live on one. See DEPLOY.md, "Before go-live".

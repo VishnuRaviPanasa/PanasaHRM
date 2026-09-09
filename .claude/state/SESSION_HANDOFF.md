@@ -168,7 +168,64 @@ upstream together if it turns out to be taken there too.
 `node node_modules/next/dist/bin/next build`. Git Bash also mangles a leading-slash env value, so
 `NEXT_PUBLIC_BASE_PATH=/panasa-hrm` needs `MSYS_NO_PATHCONV=1`. Neither affects Linux containers.
 
-### Exact next action for DEPLOY-01
+### DEPLOY-02 - reconciling the botched merge (same day, later)
+
+Merge **`aaef373`** pulled a teammate's branch that contained a SECOND, complete deployment stack,
+and **committed the conflict markers**. `git status` was clean, so nothing looked wrong - but
+`apps/api/src/auth.ts` carried `<<<<<<< HEAD` and the API did not compile.
+
+Four files had committed markers: `apps/api/src/auth.ts`, `.gitignore`, `.dockerignore`,
+`infrastructure/compose/docker-compose.prod.yml`.
+
+**The two stacks were different TOPOLOGIES, not variants.** Theirs bound host `:80`/`:443` and
+terminated its own TLS from `HRM_TLS_DIR`, which assumes PanasaHRM owns the VM. Ours publishes
+`127.0.0.1:4787` plain HTTP behind the shared host nginx that already fronts `/hr-agent/`.
+**User chose 4787** - that is the real host arrangement (DEC-105).
+
+**Adopted from their branch, because it was better:**
+
+| Their idea | Effect |
+|---|---|
+| API image reinstalls only the two workspaces it needs | **979 MB -> 292 MB** (Next and React were in an API container) |
+| `node:24-alpine` + `postgresql18-client` for the migration runner | **515 MB -> 266 MB** |
+| `seed` behind `profiles: ["seed"]`, sharing the migrate image | Closes the "no way to get data in" gap - and an ordinary `up` cannot start it |
+| Pinned `minio:RELEASE.2025-04-22...` | No silent version drift on the document store |
+| `HRM_PG_OWNER_*` vs `HRM_PG_APP_*` | The seam for OR-29; both are the owner today because of P3-7 |
+| `--auth-host=scram-sha-256` | Unioned with our `--locale=C.UTF-8` (theirs had dropped the locale) |
+| `__Host-` cookie prefix derived from one switch | Closes half of OR-21 |
+
+**Rejected, with reasons:** their `TZ: Asia/Kolkata` on postgres (DEC-106 - `fn_business_date()`
+is `now() AT TIME ZONE <setting>` and immune to it; its own COMMENT says the server runs UTC, and
+IST would make prod disagree with dev on anything using CURRENT_DATE). Their duplicate
+Dockerfiles, `infrastructure/compose/nginx/*` and `docs/runbooks/deployment.md` were removed -
+two runbooks describing two topologies is how somebody follows the wrong one at 2am.
+
+**The dangerous one (DEC-107).** The merge left TWO env vars for the cookie and two `secure:` keys
+in one object literal. `HRM_SECURE_COOKIES=true` on its own produced `__Host-hrm_session`
+**without** `Secure` - a cookie the browser refuses outright. Nobody could have logged in, and it
+would have looked like a session bug. Now one switch drives both.
+
+### Verified after reconciliation - the whole stack, again
+
+Built and run under `-p panasahrm-verify` with throwaway secrets; volumes removed afterwards.
+
+| Check | Result |
+|---|---|
+| `docker compose config` | valid |
+| All three images build | **PASS** - api 292 MB, web 319 MB, migrate 266 MB |
+| migrate one-shot, empty volume | **26/26 applied**, exit 0 |
+| postgres / minio / **redis** / api / web / nginx | **all six healthy** |
+| `/healthz` · `${BASE}/api/auth/me` · `${BASE}/login` · `${BASE}/art-mark.png` | **200 · 401 · 200 · 200** |
+| `hrm-seed` after an ordinary `up -d` | **absent** - the profile guard holds |
+| `--profile seed run --rm seed` | **exit 0**, 6 payslip PDFs into MinIO, demo logins printed |
+| **Real login through the edge** | `__Host-hrm_session=...; HttpOnly; Secure; SameSite=Lax` - full ADR-0010 |
+| **Authenticated `GET /api/auth/me`** | **200**, correct actor with `roles: [employee, hr_admin]` |
+| `api:build` · `web:build` (root and `/panasa-hrm`) | clean |
+| `authz:test` / `upload:test` / hooks | 423 / 45 / 99, 0 failed |
+| `deploy.sh` preflight | names exactly the five blank secrets, refuses before pull or build |
+| DB-backed suites | **NOT RUN** - they target the dev stack on 55432 |
+
+### Exact next action
 
 1. **On the VM: `ss -ltnp | grep 4787`**, then `cp infrastructure/compose/prod.env.template
    infrastructure/compose/prod.env`, fill the three secrets, and run `./deploy.sh`. The stack is

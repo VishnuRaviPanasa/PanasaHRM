@@ -1,6 +1,9 @@
-<<<<<<< HEAD
 # The build context is the repository root for all three images, so everything that is large,
 # machine-local or secret is excluded here rather than in three separate files.
+#
+# Without this the whole node_modules tree and every .next cache is uploaded to the daemon on
+# each build - slow, and it lets a stale local artifact leak into an image that is supposed to
+# be reproducible.
 
 # dependencies and build output - reinstalled/rebuilt inside the image
 node_modules/
@@ -43,20 +46,3 @@ test-results/
 Thumbs.db
 .idea/
 .vscode/
-=======
-# Build context hygiene. Without this the whole node_modules tree and every
-# .next cache is uploaded to the daemon on every build - slow, and it lets a
-# stale local artifact leak into an image that is supposed to be reproducible.
-node_modules
-**/node_modules
-.next
-**/.next
-dist
-**/dist
-.git
-.claude
-*.log
-.env
-.env.*
-secrets
->>>>>>> 2fab2724bfa0651580869e327ed808054853bd4b

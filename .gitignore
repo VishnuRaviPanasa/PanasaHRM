@@ -50,14 +50,12 @@ tmp/
 # the workspaces keep their own copies (apps/api, apps/web).
 **/.claude/state/dirty-files.txt
 
-<<<<<<< HEAD
 # production secrets - the deploy env file, never committed (template: prod.env.template)
 infrastructure/compose/prod.env
-=======
+
 # Local verification only - self-signed certificate, never committed
 infrastructure/compose/.tls-local/
 infrastructure/compose/docker-compose.verify.yml
 
 # Generated deliverable - rebuilt from docs/runbooks/deployment.md, not a source file
 ART-HRM-Deployment-Runbook.docx
->>>>>>> 2fab2724bfa0651580869e327ed808054853bd4b
