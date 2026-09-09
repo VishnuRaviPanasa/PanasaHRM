@@ -170,7 +170,8 @@ services:
   #                          and the override has to be stated.
   #   HRM_DEMO_PASSWORD      every demo account shares one password. Left unset it is the value
   #                          committed in the repository, which on a reachable host is a public
-  #                          credential. Required here so that cannot happen by omission.
+  #                          credential. Enforced by the container's own command, NOT by a `:?`
+  #                          on the variable - see the note on `command:` below.
   #
   # It runs as the OWNER: clearing effective-dated and append-only tables means disabling their
   # triggers, which only the owner can do.
@@ -182,7 +183,31 @@ services:
     image: panasahrm/migrate:${HRM_IMAGE_TAG:-local}
     container_name: hrm-seed
     restart: "no"
-    command: ["node", "scripts/seed.mjs"]
+    # The demo-password guard lives HERE, in the container, and not in the interpolation above.
+    #
+    # It was `${HRM_DEMO_PASSWORD:?...}`, which broke every ordinary deploy: compose interpolates
+    # the WHOLE file on every command - `build` and `up` included - and profiles do not exempt a
+    # service from that. So a stack that will never run the seed still refused to build, with an
+    # error naming a variable the operator was correctly told to leave blank. Found on the VM,
+    # not here, because the verification env file always had the variable filled in.
+    #
+    # In the container the check fires only when the seed is actually invoked, which is what was
+    # wanted in the first place. `$$` escapes the `$` so compose leaves it for the shell.
+    command:
+      - sh
+      - -c
+      - |
+        if [ -z "$${HRM_DEMO_PASSWORD}" ]; then
+          echo "REFUSED: HRM_DEMO_PASSWORD is not set." >&2
+          echo "" >&2
+          echo "Every demo account shares one password. Left unset, seed.mjs falls back to the" >&2
+          echo "value committed in the repository - on a reachable host that is a public" >&2
+          echo "credential, not a default." >&2
+          echo "" >&2
+          echo "  HRM_DEMO_PASSWORD='<choose one>' docker compose -f ... --profile seed run --rm seed" >&2
+          exit 1
+        fi
+        exec node scripts/seed.mjs
     environment:
       PGHOST: postgres
       PGPORT: "5432"
@@ -190,7 +215,7 @@ services:
       PGUSER: ${HRM_PG_OWNER_USER}
       PGPASSWORD: ${HRM_PG_OWNER_PASSWORD}
       HRM_SEED_ALLOW_NONDEV: i-understand
-      HRM_DEMO_PASSWORD: ${HRM_DEMO_PASSWORD:?set HRM_DEMO_PASSWORD - do not use the value committed in the repo}
+      HRM_DEMO_PASSWORD: ${HRM_DEMO_PASSWORD:-}
       HRM_MINIO_HOST: minio
       HRM_MINIO_PORT: "9000"
       HRM_MINIO_ACCESS_KEY: ${HRM_MINIO_ACCESS_KEY}
