@@ -1,0 +1,53 @@
+# =============================================================================
+# ART HRM - migration runner (one-shot)
+# =============================================================================
+#
+# ADR-0013: migrations run as a SEPARATE one-shot container, never on app boot.
+# An app-boot migration means replicas race each other, and a failed migration
+# takes the application down with it instead of just failing the deploy.
+#
+# It needs BOTH node and psql: scripts/migrate.mjs is Node, and it shells out to
+# `psql` deliberately (DEC-013) so the migration path has no driver dependency
+# of its own and the SQL that runs is the SQL in the file.
+#
+#     docker build -f infrastructure/docker/Dockerfile.migrate \
+#       -t art-hrm-migrate:<tag> .
+# =============================================================================
+
+FROM node:24-alpine
+
+# postgresql-client only - no server. Pinned to the major version the schema
+# targets so client and server never disagree about syntax.
+RUN apk add --no-cache postgresql17-client || apk add --no-cache postgresql-client
+
+WORKDIR /repo
+
+# The migration runner and the demo seed. Both are plain Node reading SQL files.
+COPY scripts/migrate.mjs            scripts/migrate.mjs
+COPY scripts/seed.mjs               scripts/seed.mjs
+COPY infrastructure/db/migrations   infrastructure/db/migrations
+COPY infrastructure/db/seeds        infrastructure/db/seeds
+COPY testing/db                     testing/db
+
+# THE ONE DEPENDENCY, and only the seed needs it.
+#
+# The demo seed uploads a generated payslip PDF per record to MinIO, because a
+# payslip whose document 404s is worse demo data than none - the product looks
+# broken rather than empty. That step needs the MinIO client; everything else
+# here is Node's standard library.
+#
+# Pinned to the exact version the API uses, so the two cannot drift, and
+# installed with --omit=dev so no build tooling comes with it.
+RUN npm install --no-save --no-package-lock --omit=dev minio@8.0.7  && npm cache clean --force
+
+USER node
+
+# Default: apply pending migrations, refusing any file whose checksum no longer
+# matches what was applied. Exits non-zero on failure, which is what makes it
+# usable as a deploy gate.
+#
+# No ENTRYPOINT, so the same image serves both jobs and the command says which:
+#     node scripts/migrate.mjs up       apply migrations   (the deploy gate)
+#     node scripts/migrate.mjs status   report state
+#     node scripts/seed.mjs             load DEMO data     (destructive)
+CMD ["node", "scripts/migrate.mjs", "up"]
