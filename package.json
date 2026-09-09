@@ -41,7 +41,12 @@
     "reports:test": "node testing/demo/reports-scope.test.mjs",
     "nav:test": "node testing/demo/nav-shell.test.mjs",
     "payslip:test": "node testing/demo/payslip-flow.test.mjs",
-    "masters:test": "node testing/demo/masters-flow.test.mjs"
+    "masters:test": "node testing/demo/masters-flow.test.mjs",
+    "work:test": "node testing/demo/work-hierarchy.test.mjs",
+    "period:test": "node testing/demo/period-filters.test.mjs",
+    "i18n:test": "node testing/demo/i18n.test.mjs",
+    "bizdate:test": "node testing/demo/business-date.test.mjs",
+    "browser:test": "node testing/demo/browser-verify.mjs"
   },
   "devDependencies": {
     "prettier": "^3.3.3",

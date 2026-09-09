@@ -58,8 +58,37 @@ const code = src
 // badge) is not mistaken for a nav entry.
 const navBlock = src.slice(src.indexOf('const NAV_GROUPS'), src.indexOf('export default'));
 const hrefs = [...new Set([...navBlock.matchAll(/href:\s*'([^']+)'/g)].map((m) => m[1]))];
-const titles = [...navBlock.matchAll(/title:\s*'([^']+)'/g)].map((m) => m[1]);
-const labels = [...navBlock.matchAll(/label:\s*'([^']+)'/g)].map((m) => m[1]);
+/*
+ * TITLES AND LABELS NOW COME FROM THE DICTIONARY, not from this file's own literals.
+ *
+ * The nav used to hold English strings, so these two lines read them straight out of the source.
+ * Since bilingual support landed it holds MESSAGE KEYS, and the strings live in
+ * `lib/i18n/dictionary.ts`. Resolving them here is strictly better than the old form: the
+ * glossary rules below are still checked against what a person actually sees, and a key that
+ * does not exist in the dictionary now fails loudly instead of silently yielding no titles at
+ * all - which is exactly what happened when the rename first went in and `titles` came back
+ * empty while every check still "passed".
+ */
+const DICT = 'apps/web/lib/i18n/dictionary.ts';
+const dictSrc = readFileSync(DICT, 'utf8');
+
+// The English block only: `const en = { ... } as const;`. Reading the whole file would mix the
+// Arabic values in and the glossary checks below are about the English wording.
+const enBlock = dictSrc.slice(dictSrc.indexOf('const en = {'), dictSrc.indexOf('} as const;'));
+const messages = new Map(
+  [...enBlock.matchAll(/^\s*'([^']+)':\s*'((?:[^'\\]|\\.)*)',?$/gm)]
+    .map((m) => [m[1], m[2].replace(/\\'/g, "'")]),
+);
+
+const titleKeys = [...navBlock.matchAll(/titleKey:\s*'([^']+)'/g)].map((m) => m[1]);
+const labelKeys = [...navBlock.matchAll(/labelKey:\s*'([^']+)'/g)].map((m) => m[1]);
+
+const missing = [...titleKeys, ...labelKeys].filter((k) => !messages.has(k));
+check('every nav message key exists in the dictionary', missing.length === 0,
+  missing.length ? `MISSING: ${missing.join(', ')}` : `${titleKeys.length + labelKeys.length} keys`);
+
+const titles = titleKeys.map((k) => messages.get(k) ?? k);
+const labels = labelKeys.map((k) => messages.get(k) ?? k);
 
 console.log('Application shell - navigation\n');
 
