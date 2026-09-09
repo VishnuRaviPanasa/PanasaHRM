@@ -30,6 +30,29 @@ const config: NextConfig = {
 
   ...(basePath ? { basePath, assetPrefix: basePath } : {}),
 
+  /*
+   * PRODUCTION INCIDENT, 2026-09-09: ERR_TOO_MANY_REDIRECTS on every login.
+   *
+   * With `basePath` set, Next treats `/panasa-hrm` (no trailing slash) as the canonical root URL
+   * and 308-redirects `/panasa-hrm/` to it. The host nginx has the opposite opinion for every app
+   * on that shared box, PanasaHRM included (NGINX-DEPLOY-GUIDE.md step 2):
+   * `location = /panasa-hrm { return 301 /panasa-hrm/; }`. Two proxies, two answers, same URL:
+   *
+   *   /panasa-hrm/  --[Next: 308]-->  /panasa-hrm  --[host nginx: 301]-->  /panasa-hrm/  --> ...
+   *
+   * Confirmed directly against the container, bypassing the host nginx entirely:
+   * `curl 127.0.0.1:4788/panasa-hrm/` came back `308 Permanent Redirect` -> `Location: /panasa-hrm`
+   * - proving the redirect originates in Next, not in either nginx hop (neither has a `return 30x`
+   * anywhere near this path).
+   *
+   * `skipTrailingSlashRedirect` is Next's documented answer to exactly this: a proxy in front
+   * already owns the trailing-slash decision, so Next must not also have one. It does not change
+   * the URL any route resolves to (still no trailing slash internally) - it only stops Next from
+   * bouncing a request that already arrived with one, which is precisely what the host nginx
+   * sends it. Removing it would reopen this loop the next time anyone touches this file.
+   */
+  skipTrailingSlashRedirect: true,
+
   // Trace from the REPOSITORY root, not apps/web. This is an npm-workspaces monorepo, so the
   // hoisted node_modules lives two levels up; without this Next roots the trace at apps/web and
   // the standalone bundle silently omits hoisted dependencies.
