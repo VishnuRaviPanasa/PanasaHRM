@@ -185,6 +185,40 @@ Verified after the change, from a clean volume:
 | All six containers | healthy, `127.0.0.1:4788->80/tcp` |
 | Teardown | volumes and `prod.env` removed |
 
+### DEPLOY-04 - the first real VM deploy failed at `build`; fixed (DEC-111)
+
+```
+==> Building images
+error while interpolating services.seed.environment.HRM_DEMO_PASSWORD:
+required variable HRM_DEMO_PASSWORD is missing a value
+```
+
+**`profiles:` does not exempt a service from interpolation.** Compose expands the entire file on
+every command, so the `${HRM_DEMO_PASSWORD:?...}` guarding the profiled `seed` service blocked
+`build` and `up` on a stack that would never run the seed - and the variable it demanded is one
+`prod.env.template` explicitly says to leave blank for a real deployment.
+
+Guard moved into the seed container's `command:`. Same refusal, same message, but only when the
+seed is invoked.
+
+**Why four rounds of verification missed it:** every local env file had a demo password sed'd in,
+so the blank case - the *normal* case for production - was never once exercised. The lesson is the
+repo's own: exercise the configuration a real operator would have, not the one the test needs.
+
+Verified both directions from a clean volume:
+
+| Check | Result |
+|---|---|
+| `docker compose config`, demo password blank | **exit 0** (was exit 1 - the VM failure, reproduced locally first) |
+| `./deploy.sh --no-pull`, demo password blank | **exit 0**, probes `200 / 401 / 200` |
+| `--profile seed run --rm seed`, blank | **exit 1**, "REFUSED: HRM_DEMO_PASSWORD is not set." |
+| `--profile seed run --rm seed`, password set | **exit 0**, 6 payslip PDFs, demo logins printed |
+
+**Port note:** this Windows machine's VS Code grabs loopback ports in this range dynamically - it
+took 4787 (PID 4740) and later 4788 (PID 9824). The last verification therefore ran on 4789 via a
+local `prod.env` override; **the committed value is still 4788** and the Linux VM has no VS Code.
+Confirm with `ss -ltnp | grep 4788` there.
+
 ### Machine notes
 
 `npm` on PATH in Git Bash resolves to a stray **npm 2.15.12** in the user's home directory, so
