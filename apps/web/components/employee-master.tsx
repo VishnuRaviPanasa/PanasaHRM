@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import { ApiError, api, useData } from '@/lib/api';
 import { Button, Card, CardHead, ErrorBox, Field, Toast, inputCls } from '@/components/ui';
+import { useT } from '@/lib/i18n';
 
 /**
  * Creating an employee, and moving one.
@@ -42,6 +43,7 @@ function useOptions() {
 // ---------------------------------------------------------------------------
 
 export function AddEmployee({ onDone, onCancel }: { onDone: () => void; onCancel: () => void }) {
+  const t = useT();
   const { departments, designations, loading } = useOptions();
   // The directory returns `employees`, not `rows` - checked rather than assumed, after a payslip
   // test failed on exactly that kind of guess.
@@ -75,47 +77,47 @@ export function AddEmployee({ onDone, onCancel }: { onDone: () => void; onCancel
     <Card>
       {toast && <Toast message={toast} onDone={() => setToast(null)} />}
       <CardHead
-        title="Add an employee"
-        hint="The joining date sets when their assignment begins. A future date leaves them pre-boarding until it arrives."
-        action={<Button variant="secondary" size="sm" onClick={onCancel}>Cancel</Button>}
+        title={t('mst.addEmployee')}
+        hint={t('mst.addHint')}
+        action={<Button variant="secondary" size="sm" onClick={onCancel}>{t('common.cancel')}</Button>}
       />
 
       {error && <div className="mb-3"><ErrorBox message={error} /></div>}
 
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-        <Field label="Employee number" htmlFor="e-num">
+        <Field label={t('ep.employeeNumber')} htmlFor="e-num">
           <input id="e-num" value={f.employeeNumber} placeholder="EMP006"
             onChange={(e) => setF({ ...f, employeeNumber: e.target.value.toUpperCase() })}
             className={`${inputCls} num`} />
         </Field>
-        <Field label="Full name" htmlFor="e-name">
+        <Field label={t('mst.fullName')} htmlFor="e-name">
           <input id="e-name" value={f.fullName} placeholder="Meera Nair"
             onChange={(e) => setF({ ...f, fullName: e.target.value })} className={inputCls} />
         </Field>
-        <Field label="Work email" htmlFor="e-mail">
+        <Field label={t('login.email')} htmlFor="e-mail">
           <input id="e-mail" type="email" value={f.workEmail} placeholder="meera.nair@panasatech.com"
             onChange={(e) => setF({ ...f, workEmail: e.target.value })} className={inputCls} />
         </Field>
-        <Field label="Joining date" hint="may be in the past or the future" htmlFor="e-joined">
+        <Field label={t('mst.joiningDate')} hint={t('mst.pastOrFuture')} htmlFor="e-joined">
           <input id="e-joined" type="date" value={f.joinedOn}
             onChange={(e) => setF({ ...f, joinedOn: e.target.value })}
             className={`${inputCls} num`} />
         </Field>
-        <Field label="Department" htmlFor="e-dept">
+        <Field label={t('emp.department')} htmlFor="e-dept">
           <select id="e-dept" value={f.departmentId} disabled={loading}
             onChange={(e) => setF({ ...f, departmentId: e.target.value })} className={inputCls}>
             <option value="">— choose —</option>
             {departments.map((d) => <option key={d.id} value={d.id}>{d.code} · {d.name}</option>)}
           </select>
         </Field>
-        <Field label="Designation" htmlFor="e-desig">
+        <Field label={t('emp.designation')} htmlFor="e-desig">
           <select id="e-desig" value={f.designationId} disabled={loading}
             onChange={(e) => setF({ ...f, designationId: e.target.value })} className={inputCls}>
             <option value="">— choose —</option>
             {designations.map((d) => <option key={d.id} value={d.id}>{d.code} · {d.name}</option>)}
           </select>
         </Field>
-        <Field label="Line manager" hint="optional" htmlFor="e-mgr">
+        <Field label={t('mst.lineManager')} hint="optional" htmlFor="e-mgr">
           <select id="e-mgr" value={f.managerId}
             onChange={(e) => setF({ ...f, managerId: e.target.value })} className={inputCls}>
             <option value="">— none —</option>
@@ -124,11 +126,11 @@ export function AddEmployee({ onDone, onCancel }: { onDone: () => void; onCancel
             ))}
           </select>
         </Field>
-        <Field label="Work location" htmlFor="e-loc">
+        <Field label={t('ep.workLocation')} htmlFor="e-loc">
           <input id="e-loc" value={f.workLocation}
             onChange={(e) => setF({ ...f, workLocation: e.target.value })} className={inputCls} />
         </Field>
-        <Field label="Employment type" htmlFor="e-type">
+        <Field label={t('ep.employmentType')} htmlFor="e-type">
           <select id="e-type" value={f.employmentType}
             onChange={(e) => setF({ ...f, employmentType: e.target.value })} className={inputCls}>
             <option value="permanent">permanent</option>
@@ -139,7 +141,7 @@ export function AddEmployee({ onDone, onCancel }: { onDone: () => void; onCancel
       </div>
 
       <div className="mt-4 flex flex-wrap items-center gap-2">
-        <Button busy={busy} onClick={save} disabled={!ready}>Add employee</Button>
+        <Button busy={busy} onClick={save} disabled={!ready}>{t('emp.add')}</Button>
         {!ready && (
           <span className="text-[12.5px] text-ink-500">
             A department and designation are required — an employee with no assignment has no
@@ -160,6 +162,7 @@ export function ChangeAssignment({ employeeId, employeeName, current, onDone, on
   onDone: () => void;
   onCancel: () => void;
 }) {
+  const t = useT();
   const { departments, designations, loading } = useOptions();
   // The directory returns `employees`, not `rows` - checked rather than assumed, after a payslip
   // test failed on exactly that kind of guess.
@@ -188,9 +191,9 @@ export function ChangeAssignment({ employeeId, employeeName, current, onDone, on
   return (
     <Card>
       <CardHead
-        title="Change assignment"
-        hint="Transfer, promotion or a new line manager — all the same record, with a date."
-        action={<Button variant="secondary" size="sm" onClick={onCancel}>Cancel</Button>}
+        title={t('ep.changeAssignment')}
+        hint={t('mst.changeAssignmentHint')}
+        action={<Button variant="secondary" size="sm" onClick={onCancel}>{t('common.cancel')}</Button>}
       />
 
       {error && <div className="mb-3"><ErrorBox message={error} /></div>}
@@ -204,21 +207,21 @@ export function ChangeAssignment({ employeeId, employeeName, current, onDone, on
       </p>
 
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-        <Field label="New department" htmlFor="a-dept">
+        <Field label={t('mst.newDepartment')} htmlFor="a-dept">
           <select id="a-dept" value={f.departmentId} disabled={loading}
             onChange={(e) => setF({ ...f, departmentId: e.target.value })} className={inputCls}>
             <option value="">— unchanged —</option>
             {departments.map((d) => <option key={d.id} value={d.id}>{d.code} · {d.name}</option>)}
           </select>
         </Field>
-        <Field label="New designation" htmlFor="a-desig">
+        <Field label={t('mst.newDesignation')} htmlFor="a-desig">
           <select id="a-desig" value={f.designationId} disabled={loading}
             onChange={(e) => setF({ ...f, designationId: e.target.value })} className={inputCls}>
             <option value="">— unchanged —</option>
             {designations.map((d) => <option key={d.id} value={d.id}>{d.code} · {d.name}</option>)}
           </select>
         </Field>
-        <Field label="New line manager" htmlFor="a-mgr">
+        <Field label={t('mst.newLineManager')} htmlFor="a-mgr">
           <select id="a-mgr" value={f.managerId}
             onChange={(e) => setF({ ...f, managerId: e.target.value })} className={inputCls}>
             <option value="">— unchanged —</option>
@@ -227,13 +230,13 @@ export function ChangeAssignment({ employeeId, employeeName, current, onDone, on
             ))}
           </select>
         </Field>
-        <Field label="Effective from" hint="the day the change takes effect" htmlFor="a-from">
+        <Field label={t('mst.effectiveFrom')} hint={t('mst.effectiveHint')} htmlFor="a-from">
           <input id="a-from" type="date" value={f.effectiveFrom}
             onChange={(e) => setF({ ...f, effectiveFrom: e.target.value })}
             className={`${inputCls} num`} />
         </Field>
         <div className="sm:col-span-2">
-          <Field label="Reason" hint="required — it is what explains the move a year from now"
+          <Field label={t('leave.reason')} hint={t('mst.reasonRequired')}
             htmlFor="a-reason">
             <input id="a-reason" value={f.reason} placeholder="Promoted to Senior Engineer"
               onChange={(e) => setF({ ...f, reason: e.target.value })} className={inputCls} />
@@ -256,10 +259,10 @@ export function ChangeAssignment({ employeeId, employeeName, current, onDone, on
         <Button busy={busy} onClick={save}
           disabled={!f.effectiveFrom || f.reason.trim().length < 3
             || (!f.departmentId && !f.designationId && !f.managerId)}>
-          Record the change
+          {t('mst.recordChange')}
         </Button>
         {(!f.departmentId && !f.designationId && !f.managerId) && (
-          <span className="text-[12.5px] text-ink-500">Change at least one field.</span>
+          <span className="text-[12.5px] text-ink-500">{t('mst.changeOneField')}</span>
         )}
       </div>
     </Card>

@@ -1,7 +1,8 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { ApiError, api, fmtDate, fmtDateShort, useData } from '@/lib/api';
+import { api, ApiError, fmtDate, fmtDateShort, useBusinessDate, useData } from '@/lib/api';
+import { useT } from '@/lib/i18n';
 import {
   Async, Badge, Button, Card, CardHead, Empty, ErrorBox, Field, Skeleton, Stat, Toast, inputCls,
 } from '@/components/ui';
@@ -63,6 +64,7 @@ const period = (r: { period_start: string; period_end: string }) =>
 
 /** The salary breakdown for one payslip, plus the document. */
 export function PayslipDetail({ id, onClose }: { id: string; onClose: () => void }) {
+  const t = useT();
   const state = useData<PayslipDetailData>(`/payslips/${id}`, [id]);
   const [preview, setPreview] = useState<{ url: string; revoke: () => void } | null>(null);
   const [busy, setBusy] = useState(false);
@@ -101,7 +103,7 @@ export function PayslipDetail({ id, onClose }: { id: string; onClose: () => void
           <div className="flex flex-wrap items-start justify-between gap-3">
             <div>
               <h2 className="text-[17px] font-semibold text-ink-900">
-                {d.payslip.period_start ? period(d.payslip as PayslipRow) : 'Payslip'}
+                {d.payslip.period_start ? period(d.payslip as PayslipRow) : t('pay.payslip')}
               </h2>
               <p className="mt-0.5 flex flex-wrap items-center gap-2 text-[13px] text-ink-500">
                 <Badge status={d.payslip.status === 'issued' ? 'approved'
@@ -112,13 +114,13 @@ export function PayslipDetail({ id, onClose }: { id: string; onClose: () => void
                 {d.payslip.full_name && <span>· {d.payslip.full_name}</span>}
               </p>
             </div>
-            <Button variant="secondary" size="sm" onClick={onClose}>Close</Button>
+            <Button variant="secondary" size="sm" onClick={onClose}>{t('common.close')}</Button>
           </div>
 
           {d.payslip.status === 'void' && (
-            <Card className="border-rose-200 bg-rose-50/50">
+            <Card className="border-rose-200 bg-rose-50/50 px-4 py-3.5 sm:px-5">
               <p className="text-[13px] text-rose-800">
-                <span className="font-medium">This payslip was voided.</span>{' '}
+                <span className="font-medium">{t('pay.voided')}</span>{' '}
                 {d.payslip.void_reason}
                 {' '}The record is kept — a pay record is never deleted — but its document is no
                 longer available.
@@ -126,10 +128,10 @@ export function PayslipDetail({ id, onClose }: { id: string; onClose: () => void
             </Card>
           )}
 
-          <section className="grid grid-cols-3 gap-3">
-            <Stat label="Gross" value={`₹${formatPaise(d.totals.gross_minor)}`} />
-            <Stat label="Deductions" value={`₹${formatPaise(d.totals.deductions_minor)}`} />
-            <Stat label="Net pay" value={`₹${formatPaise(d.totals.net_minor)}`} tone="brand" />
+          <section className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+            <Stat label={t('pay.gross')} value={`₹${formatPaise(d.totals.gross_minor)}`} />
+            <Stat label={t('payslips.deductions')} value={`₹${formatPaise(d.totals.deductions_minor)}`} />
+            <Stat label={t('payslips.netPay')} value={`₹${formatPaise(d.totals.net_minor)}`} tone="brand" />
           </section>
 
           {/*
@@ -141,8 +143,8 @@ export function PayslipDetail({ id, onClose }: { id: string; onClose: () => void
             * and it is worth showing rather than hiding.
             */}
           {!d.reconciles && (
-            <Card className={d.payslip.status === 'issued'
-              ? 'border-rose-300 bg-rose-50' : 'border-amber-200 bg-amber-50/60'}>
+            <Card className={`px-4 py-3.5 sm:px-5 ${d.payslip.status === 'issued'
+              ? 'border-rose-300 bg-rose-50' : 'border-amber-200 bg-amber-50/60'}`}>
               <p className="text-[13px] text-ink-800">
                 <span className="font-medium">
                   {d.payslip.status === 'issued'
@@ -162,20 +164,24 @@ export function PayslipDetail({ id, onClose }: { id: string; onClose: () => void
           )}
 
           <Card>
-            <CardHead title="Breakdown" hint={`${d.totals.line_count} line items`} />
+            <CardHead title={t('pay.breakdown')} hint={`${d.totals.line_count} line items`} />
             <div className="overflow-x-auto">
-              <table className="w-full min-w-[26rem] text-left text-[13.5px]">
+              <table className="w-full min-w-[26rem] text-start text-[13.5px]">
                 <tbody className="divide-y divide-ink-100">
                   {(['earning', 'deduction'] as const).map((kind) => {
                     const rows = d.lines.filter((l) => l.kind === kind);
                     if (rows.length === 0) return null;
                     return [
                       <tr key={`${kind}-head`}>
+                        {/* A group heading spanning the row, so scope is `colgroup` rather than
+                            `col` - it labels the section below it, not one column. `text-start`
+                            rather than `text-left` so it follows the writing direction. */}
                         <th
                           colSpan={2}
-                          className="px-3 pt-3 pb-1 text-left text-[11px] font-semibold uppercase tracking-[0.07em] text-ink-400"
+                          scope="colgroup"
+                          className="px-3 pt-3 pb-1 text-start text-[11px] font-semibold uppercase tracking-[0.07em] text-ink-400"
                         >
-                          {kind === 'earning' ? 'Earnings' : 'Deductions'}
+                          {kind === 'earning' ? t('payslips.earnings') : t('payslips.deductions')}
                         </th>
                       </tr>,
                       ...rows.map((l) => (
@@ -183,13 +189,13 @@ export function PayslipDetail({ id, onClose }: { id: string; onClose: () => void
                           <td className="px-3 py-2 text-ink-800">
                             {l.name}
                             {l.is_statutory && (
-                              <span className="ml-2 text-[11px] text-ink-400">statutory</span>
+                              <span className="ms-2 text-[11px] text-ink-400">statutory</span>
                             )}
                             {l.note && (
                               <div className="text-[12px] text-ink-400">{l.note}</div>
                             )}
                           </td>
-                          <td className={`num px-3 py-2 text-right ${
+                          <td className={`num px-3 py-2 text-end ${
                             kind === 'deduction' ? 'text-rose-700' : 'text-ink-800'}`}>
                             {kind === 'deduction' ? '−' : ''}₹{formatPaise(l.amount_minor)}
                           </td>
@@ -198,8 +204,8 @@ export function PayslipDetail({ id, onClose }: { id: string; onClose: () => void
                     ];
                   })}
                   <tr className="bg-ink-50">
-                    <td className="px-3 py-2.5 font-semibold text-ink-900">Net pay</td>
-                    <td className="num px-3 py-2.5 text-right font-semibold text-ink-900">
+                    <td className="px-3 py-2.5 font-semibold text-ink-900">{t('payslips.netPay')}</td>
+                    <td className="num px-3 py-2.5 text-end font-semibold text-ink-900">
                       ₹{formatPaise(d.totals.net_minor)}
                     </td>
                   </tr>
@@ -210,41 +216,55 @@ export function PayslipDetail({ id, onClose }: { id: string; onClose: () => void
 
           <Card>
             <CardHead
-              title="The payslip document"
+              title={t('pay.document')}
               hint={d.payslip.has_document
                 ? 'The PDF issued for this period, stored in the document store.'
                 : 'No document is available for this payslip.'}
             />
-            {err && <div className="mb-3"><ErrorBox message={err} /></div>}
+            {/*
+              * ONE PADDED BODY, so everything below the header shares the header's edge.
+              *
+              * The View and Download buttons, the error box and the PDF preview each sat directly
+              * inside <Card> with no padding of their own, while `CardHead` insets its text by
+              * `px-4 sm:px-5`. So the buttons started ~23px to the LEFT of the heading above them
+              * and pressed against the bottom of the card. `p-4 sm:p-5` is what every other card
+              * body in this app uses; `Empty` brings its own padding, so it stays outside.
+              */}
             {d.payslip.has_document ? (
-              <div className="flex flex-wrap gap-2">
-                <Button size="sm" onClick={view} disabled={busy}>View</Button>
-                <Button variant="secondary" size="sm" onClick={download} disabled={busy}>
-                  Download
-                </Button>
+              <div className="p-4 sm:p-5">
+                {err && <div className="mb-3"><ErrorBox message={err} /></div>}
+                <div className="flex flex-wrap gap-2">
+                  <Button size="sm" onClick={view} disabled={busy}>{t('docs.view')}</Button>
+                  <Button variant="secondary" size="sm" onClick={download} disabled={busy}>
+                    {t('docs.download')}
+                  </Button>
+                </div>
+
+                {preview && (
+                  <div className="mt-3 overflow-hidden rounded-lg border border-ink-200">
+                    {/*
+                      * `sandbox` with NO allow tokens: an opaque origin with scripts refused. A
+                      * PDF is a program format, and this one arrived from a file upload.
+                      */}
+                    <iframe
+                      src={preview.url}
+                      title={t('pay.payslip')}
+                      sandbox=""
+                      className="h-[28rem] w-full bg-ink-50"
+                    />
+                  </div>
+                )}
               </div>
             ) : (
-              <Empty
-                title="No document"
-                hint={d.payslip.status === 'void'
-                  ? 'Voiding a payslip withdraws its document.'
-                  : 'HR attaches the PDF before the payslip is issued.'}
-              />
-            )}
-
-            {preview && (
-              <div className="mt-3 overflow-hidden rounded-lg border border-ink-200">
-                {/*
-                  * `sandbox` with NO allow tokens: an opaque origin with scripts refused. A PDF is
-                  * a program format, and this one arrived from a file upload.
-                  */}
-                <iframe
-                  src={preview.url}
-                  title="Payslip"
-                  sandbox=""
-                  className="h-[28rem] w-full bg-ink-50"
+              <>
+                {err && <div className="px-4 pt-4 sm:px-5"><ErrorBox message={err} /></div>}
+                <Empty
+                  title={t('pay.noDocument')}
+                  hint={d.payslip.status === 'void'
+                    ? 'Voiding a payslip withdraws its document.'
+                    : 'HR attaches the PDF before the payslip is issued.'}
                 />
-              </div>
+              </>
             )}
           </Card>
         </div>
@@ -259,6 +279,7 @@ export function PayslipDetail({ id, onClose }: { id: string; onClose: () => void
 export function PayslipList({ employeeId, onOpen, emptyHint }: {
   employeeId?: string; onOpen: (id: string) => void; emptyHint?: string;
 }) {
+  const t = useT();
   const q = employeeId ? `?employeeId=${employeeId}` : '';
   const state = useData<{ rows: PayslipRow[] }>(`/payslips${q}`, [q]);
 
@@ -269,22 +290,24 @@ export function PayslipList({ employeeId, onOpen, emptyHint }: {
       isEmpty={(d) => d.rows.length === 0}
       empty={(
         <Card>
-          <Empty title="No payslips yet" hint={emptyHint ?? 'Payslips appear here once HR issues them.'} />
+          <Empty title={t('payslips.empty')} hint={emptyHint ?? 'Payslips appear here once HR issues them.'} />
         </Card>
       )}
     >
       {(d) => (
         <Card>
           <div className="overflow-x-auto">
-            <table className="w-full min-w-[34rem] text-left text-[13.5px]">
+            <table className="w-full min-w-[34rem] text-start text-[13.5px]">
               <thead>
                 <tr className="border-b border-ink-200">
-                  {['Period', 'Paid', 'Status', 'Net pay', ''].map((h, i) => (
-                    <th
-                      key={h || 'action'}
-                      className={`px-3 py-2 text-[12px] font-medium uppercase tracking-wide text-ink-400 ${i > 0 ? 'text-right' : ''}`}
+                  {[t('period.label'), t('payslips.paid'), t('common.status'), t('payslips.netPay'), t('common.actions')].map((h, i) => (
+                    <th scope="col"
+                      key={h}
+                      className={`px-3 py-2 text-[12px] font-medium uppercase tracking-wide text-ink-400 ${i > 0 ? 'text-end' : ''}`}
                     >
-                      {h}
+                      {/* Named for assistive tech, hidden visually - a column of buttons needs no
+                          visible label but must not be anonymous. */}
+                      <span className={h === t('common.actions') ? 'sr-only' : undefined}>{h}</span>
                     </th>
                   ))}
                 </tr>
@@ -298,26 +321,26 @@ export function PayslipList({ employeeId, onOpen, emptyHint }: {
                         <div className="num text-[12px] text-ink-400">{r.employee_number}</div>
                       )}
                     </td>
-                    <td className="num px-3 py-2.5 text-right text-ink-600">
+                    <td className="num px-3 py-2.5 text-end text-ink-600">
                       {r.pay_date ? fmtDateShort(r.pay_date) : '—'}
                     </td>
-                    <td className="px-3 py-2.5 text-right">
+                    <td className="px-3 py-2.5 text-end">
                       <Badge status={r.status === 'issued' ? 'approved'
                         : r.status === 'void' ? 'rejected' : 'draft'}>
                         {r.status}
                       </Badge>
                       {!r.reconciles && r.status !== 'void' && (
-                        <span className="ml-1.5 text-[11px] font-medium text-amber-700">
-                          unreconciled
+                        <span className="ms-1.5 text-[11px] font-medium text-amber-700">
+                          {t('payslips.unreconciled')}
                         </span>
                       )}
                     </td>
-                    <td className="num px-3 py-2.5 text-right font-medium text-ink-900">
+                    <td className="num px-3 py-2.5 text-end font-medium text-ink-900">
                       ₹{formatPaise(r.net_minor)}
                     </td>
-                    <td className="px-3 py-2.5 text-right">
+                    <td className="px-3 py-2.5 text-end">
                       <Button variant="secondary" size="sm" onClick={() => onOpen(r.id)}>
-                        Open
+                        {t('common.open')}
                       </Button>
                     </td>
                   </tr>
@@ -352,12 +375,26 @@ interface Component {
 export function AddPayslip({ employeeId, employeeName, onDone, onCancel }: {
   employeeId: string; employeeName: string; onDone: () => void; onCancel: () => void;
 }) {
+  const t = useT();
   const comps = useData<{ components: Component[] }>('/payslips/components');
-  const today = new Date().toISOString().slice(0, 10);
-  const monthStart = `${today.slice(0, 7)}-01`;
+  /*
+   * The pay period defaults from the SERVER's business date.
+   *
+   * It was `new Date().toISOString().slice(0, 10)`, so before 05:30 IST the period ended
+   * a day early. That is not cosmetic on this form: 0024 stores the period as a generated
+   * half-open range with an EXCLUDE constraint, and the payslip only issues when the net
+   * derived from the lines matches the net declared on the PDF - a period a day short is a
+   * month's payroll attributed to the wrong window.
+   */
+  const today = useBusinessDate();
+  const [periodStart, setPeriodStart] = useState('');
+  const [periodEnd, setPeriodEnd] = useState('');
 
-  const [periodStart, setPeriodStart] = useState(monthStart);
-  const [periodEnd, setPeriodEnd] = useState(today);
+  useEffect(() => {
+    if (!today) return;
+    setPeriodStart((v) => v || `${today.slice(0, 7)}-01`);
+    setPeriodEnd((v) => v || today);
+  }, [today]);
   const [payDate, setPayDate] = useState('');
   const [declaredNet, setDeclaredNet] = useState('');
   const [amounts, setAmounts] = useState<Record<string, string>>({});
@@ -425,29 +462,29 @@ export function AddPayslip({ employeeId, employeeName, onDone, onCancel }: {
 
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
-          <h2 className="text-[17px] font-semibold text-ink-900">Add a payslip</h2>
+          <h2 className="text-[17px] font-semibold text-ink-900">{t('pay.addPayslip')}</h2>
           <p className="mt-0.5 text-[13px] text-ink-500">
             For {employeeName}. Enter the finalised payroll figures and attach the issued PDF —
             nothing here is calculated.
           </p>
         </div>
-        <Button variant="secondary" size="sm" onClick={onCancel}>Cancel</Button>
+        <Button variant="secondary" size="sm" onClick={onCancel}>{t('common.cancel')}</Button>
       </div>
 
       {err && <ErrorBox message={err} />}
 
       <Card>
-        <CardHead title="Pay period" />
+        <CardHead title={t('pay.payPeriod')} />
         <div className="grid gap-3 sm:grid-cols-3">
-          <Field label="From" htmlFor="ps-from">
+          <Field label={t('leave.from')} htmlFor="ps-from">
             <input id="ps-from" type="date" value={periodStart} max={periodEnd}
               onChange={(e) => setPeriodStart(e.target.value)} className={inputCls} />
           </Field>
-          <Field label="To" htmlFor="ps-to">
+          <Field label={t('leave.to')} htmlFor="ps-to">
             <input id="ps-to" type="date" value={periodEnd} min={periodStart}
               onChange={(e) => setPeriodEnd(e.target.value)} className={inputCls} />
           </Field>
-          <Field label="Pay date" hint="optional" htmlFor="ps-paid">
+          <Field label={t('pay.payDate')} hint="optional" htmlFor="ps-paid">
             <input id="ps-paid" type="date" value={payDate}
               onChange={(e) => setPayDate(e.target.value)} className={inputCls} />
           </Field>
@@ -458,7 +495,7 @@ export function AddPayslip({ employeeId, employeeName, onDone, onCancel }: {
         {(['earning', 'deduction'] as const).map((kind) => (
           <Card key={kind}>
             <CardHead
-              title={kind === 'earning' ? 'Earnings' : 'Deductions'}
+              title={kind === 'earning' ? t('payslips.earnings') : t('payslips.deductions')}
               hint={kind === 'earning' ? 'Rupees. Leave blank to omit a component.'
                 : 'Enter as positive amounts — they are subtracted.'}
             />
@@ -468,7 +505,7 @@ export function AddPayslip({ employeeId, employeeName, onDone, onCancel }: {
                   <label htmlFor={`amt-${c.code}`} className="flex-1 text-[13.5px] text-ink-700">
                     {c.name}
                     {c.is_statutory && (
-                      <span className="ml-1.5 text-[11px] text-ink-400">statutory</span>
+                      <span className="ms-1.5 text-[11px] text-ink-400">statutory</span>
                     )}
                   </label>
                   <input
@@ -477,7 +514,7 @@ export function AddPayslip({ employeeId, employeeName, onDone, onCancel }: {
                     placeholder="0.00"
                     value={amounts[c.code] ?? ''}
                     onChange={(e) => setAmounts((a) => ({ ...a, [c.code]: e.target.value }))}
-                    className={`${inputCls} num w-32 text-right`}
+                    className={`${inputCls} num w-32 text-end`}
                   />
                 </div>
               ))}
@@ -488,23 +525,23 @@ export function AddPayslip({ employeeId, employeeName, onDone, onCancel }: {
 
       <Card>
         <CardHead
-          title="Check against the PDF"
-          hint="The net below is a total of what you entered. It must equal the net printed on the payslip PDF before it can be issued."
+          title={t('pay.checkAgainstPdf')}
+          hint={t('pay.reconcileHint')}
         />
-        <div className="grid grid-cols-3 gap-3">
-          <Stat label="Gross" value={`₹${formatPaise(gross.toString())}`} />
-          <Stat label="Deductions" value={`₹${formatPaise(deductions.toString())}`} />
-          <Stat label="Net pay" value={`₹${formatPaise(net.toString())}`} tone="brand" />
+        <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+          <Stat label={t('pay.gross')} value={`₹${formatPaise(gross.toString())}`} />
+          <Stat label={t('payslips.deductions')} value={`₹${formatPaise(deductions.toString())}`} />
+          <Stat label={t('payslips.netPay')} value={`₹${formatPaise(net.toString())}`} tone="brand" />
         </div>
         <div className="mt-3 max-w-xs">
           <Field
-            label="Net pay as printed on the PDF"
-            hint="Typed separately on purpose, so the two can be compared."
+            label={t('pay.netAsPrinted')}
+            hint={t('pay.typedSeparately')}
             htmlFor="ps-declared"
           >
             <input id="ps-declared" inputMode="decimal" placeholder="0.00" value={declaredNet}
               onChange={(e) => setDeclaredNet(e.target.value)}
-              className={`${inputCls} num text-right`} />
+              className={`${inputCls} num text-end`} />
           </Field>
         </div>
         {declaredNet.trim() !== '' && (
@@ -517,12 +554,12 @@ export function AddPayslip({ employeeId, employeeName, onDone, onCancel }: {
       </Card>
 
       <Card>
-        <CardHead title="The payslip PDF" hint="PDF only, up to 8 MB. Required before issuing." />
+        <CardHead title={t('pay.thePdf')} hint={t('pay.pdfHint')} />
         <input
           type="file"
           accept="application/pdf"
           onChange={(e) => setFile(e.target.files?.[0] ?? null)}
-          className="block w-full text-[13.5px] text-ink-600 file:mr-3 file:rounded-lg file:border-0 file:bg-ink-100 file:px-3 file:py-1.5 file:text-[13px] file:font-medium file:text-ink-700 hover:file:bg-ink-200"
+          className="block w-full text-[13.5px] text-ink-600 file:me-3 file:rounded-lg file:border-0 file:bg-ink-100 file:px-3 file:py-1.5 file:text-[13px] file:font-medium file:text-ink-700 hover:file:bg-ink-200"
         />
         {file && (
           <p className="mt-2 text-[12.5px] text-ink-500">
@@ -533,10 +570,10 @@ export function AddPayslip({ employeeId, employeeName, onDone, onCancel }: {
 
       <div className="flex flex-wrap items-center gap-2">
         <Button onClick={() => save(true)} disabled={busy || !matches || !file}>
-          Save and issue
+          {t('pay.saveAndIssue')}
         </Button>
         <Button variant="secondary" onClick={() => save(false)} disabled={busy}>
-          Save as draft
+          {t('pay.saveAsDraft')}
         </Button>
         {(!matches || !file) && (
           <span className="text-[12.5px] text-ink-500">

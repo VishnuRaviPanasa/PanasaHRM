@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react';
 import { api, ApiError, fmtDate, hasRole, useData, type Actor } from '@/lib/api';
 import { Async, Badge, Button, Card, CardHead, Empty, Field, Skeleton, Toast, inputCls } from '@/components/ui';
+import { useT, type MessageKey } from '@/lib/i18n';
 
 type PolicyKind = 'attendance' | 'employment';
 
@@ -24,22 +25,27 @@ interface Impact {
   lockedPeriodDays: number; payrollLockingImplemented: boolean; reasonRequired: boolean;
 }
 
-/** Field metadata: how to label, render and edit each policy value. */
+/**
+ * Field metadata: how to label, render and edit each policy value.
+ *
+ * Holds a labelKey rather than a label, because these are module-level constants and
+ * t() is bound to a component. Resolved wherever a field is rendered.
+ */
 const ATT_FIELDS = [
-  { key: 'grace_period_minutes',  label: 'Grace period',        unit: 'min', note: 'Late if the first punch is after start + grace' },
-  { key: 'half_day_min_minutes',  label: 'Half-day threshold',  unit: 'min', note: 'Below this and above zero counts as a half day' },
-  { key: 'full_day_min_minutes',  label: 'Full-day threshold',  unit: 'min', note: 'Must stay reachable within the shift after the grace period' },
-  { key: 'standard_day_minutes',  label: 'Standard day',        unit: 'min', note: 'Nominal day. Also the comp-off proof requirement' },
-  { key: 'ot_enabled',            label: 'Overtime enabled',    unit: 'bool', note: 'Captured but unpaid until an overtime policy exists' },
-  { key: 'ot_min_minutes',        label: 'Overtime minimum',    unit: 'min', note: 'Minimum extra time before overtime is recorded' },
+  { key: 'grace_period_minutes',  labelKey: 'set.gracePeriod',        unit: 'min', note: 'Late if the first punch is after start + grace' },
+  { key: 'half_day_min_minutes',  labelKey: 'set.halfDay',  unit: 'min', note: 'Below this and above zero counts as a half day' },
+  { key: 'full_day_min_minutes',  labelKey: 'set.fullDay',  unit: 'min', note: 'Must stay reachable within the shift after the grace period' },
+  { key: 'standard_day_minutes',  labelKey: 'set.standardDay',        unit: 'min', note: 'Nominal day. Also the comp-off proof requirement' },
+  { key: 'ot_enabled',            labelKey: 'set.otEnabled',    unit: 'bool', note: 'Captured but unpaid until an overtime policy exists' },
+  { key: 'ot_min_minutes',        labelKey: 'set.otMinimum',    unit: 'min', note: 'Minimum extra time before overtime is recorded' },
 ] as const;
 
 const EMP_FIELDS = [
-  { key: 'notice_period_days',       label: 'Notice period',            unit: 'days', note: '' },
-  { key: 'probation_months',         label: 'Probation length',         unit: 'months', note: 'Not set means unknown, never zero. Any calculation depending on it refuses rather than assuming' },
-  { key: 'cl_blocked_in_notice',     label: 'CL blocked during notice', unit: 'bool', note: '' },
-  { key: 'sl_extends_notice',        label: 'SL extends notice',        unit: 'bool', note: '' },
-  { key: 'salary_disbursement_day',  label: 'Salary disbursement day',  unit: 'day-of-month', note: 'Capped at 28 so the date exists in February' },
+  { key: 'notice_period_days',       labelKey: 'set.noticePeriod',            unit: 'days', note: '' },
+  { key: 'probation_months',         labelKey: 'set.probationLength',         unit: 'months', note: 'Not set means unknown, never zero. Any calculation depending on it refuses rather than assuming' },
+  { key: 'cl_blocked_in_notice',     labelKey: 'set.clBlocked', unit: 'bool', note: '' },
+  { key: 'sl_extends_notice',        labelKey: 'set.slExtends',        unit: 'bool', note: '' },
+  { key: 'salary_disbursement_day',  labelKey: 'set.salaryDay',  unit: 'day-of-month', note: 'Capped at 28 so the date exists in February' },
 ] as const;
 
 const fmtVal = (v: any, unit: string) => {
@@ -53,6 +59,7 @@ const fmtVal = (v: any, unit: string) => {
 };
 
 export default function SettingsPage() {
+  const t = useT();
   const me = useData<{ actor: Actor }>('/auth/me');
   const state = useData<Settings>('/settings');
   const [tab, setTab] = useState<'policy' | 'settings'>('policy');
@@ -70,7 +77,7 @@ export default function SettingsPage() {
   return (
     <div className="space-y-5">
       <div>
-        <h1 className="text-[21px] font-semibold text-ink-900">Company settings</h1>
+        <h1 className="text-[21px] font-semibold text-ink-900">{t('set.company')}</h1>
         <p className="mt-0.5 max-w-3xl text-[13.5px] text-ink-500">
           A policy change is a bulk data operation wearing a form. Changing a threshold does not
           just update a row — it changes how every attendance day is classified. So policy has no
@@ -88,7 +95,7 @@ export default function SettingsPage() {
 
       {canRead && !canEdit && me.data && (
         <div role="status" className="rounded-lg bg-ink-100 px-3.5 py-2.5 text-[13px] text-ink-700">
-          You are signed in as <strong className="font-semibold">{(me.data.actor.roles ?? []).join(', ').replace(/_/g, ' ')}</strong>.
+          {t('set.signedInAs')} <strong className="font-semibold">{(me.data.actor.roles ?? []).join(', ').replace(/_/g, ' ')}</strong>.
           Settings are read-only — only HR admin can change policy.
         </div>
       )}
@@ -117,7 +124,7 @@ export default function SettingsPage() {
             )}
 
             {/* Two tabs, because there are two classes of configuration (ADR-0019). */}
-            <div role="tablist" aria-label="Settings sections" className="flex gap-1 border-b border-ink-200">
+            <div role="tablist" aria-label={t('set.sections')} className="flex gap-1 border-b border-ink-200">
               {([['policy', 'Policy — effective-dated'], ['settings', 'Settings — mutable']] as const).map(([id, label]) => (
                 <button
                   key={id}
@@ -140,15 +147,15 @@ export default function SettingsPage() {
             {tab === 'policy' ? (
               <div role="tabpanel" id="panel-policy" aria-labelledby="tab-policy" className="space-y-5">
                 <PolicyCard
-                  kind="attendance" title="Attendance policy"
-                  hint="Governs how every attendance day is classified. Resolved as of the date being computed, never 'current'."
+                  kind="attendance" title={t('set.attendancePolicy')}
+                  hint={t('set.attendancePolicyHint')}
                   fields={ATT_FIELDS} current={d.attendance} businessDate={d.businessDate}
                   canEdit={canEdit} onChanged={(m) => { setToast({ msg: m, tone: 'good' }); void state.reload(); }}
                   onError={(m) => setToast({ msg: m, tone: 'bad' })}
                 />
                 <PolicyCard
-                  kind="employment" title="Employment policy"
-                  hint="Notice periods, probation and the salary disbursement day."
+                  kind="employment" title={t('set.employmentPolicy')}
+                  hint={t('set.employmentPolicyHint')}
                   fields={EMP_FIELDS} current={d.employment} businessDate={d.businessDate}
                   canEdit={canEdit} onChanged={(m) => { setToast({ msg: m, tone: 'good' }); void state.reload(); }}
                   onError={(m) => setToast({ msg: m, tone: 'bad' })}
@@ -177,10 +184,11 @@ export default function SettingsPage() {
 
 function PolicyCard({ kind, title, hint, fields, current, businessDate, canEdit, onChanged, onError }: {
   kind: PolicyKind; title: string; hint: string;
-  fields: readonly { key: string; label: string; unit: string; note: string }[];
+  fields: readonly { key: string; labelKey: MessageKey; unit: string; note: string }[];
   current: Record<string, any> | null; businessDate: string; canEdit: boolean;
   onChanged: (msg: string) => void; onError: (msg: string) => void;
 }) {
+  const t = useT();
   const [editing, setEditing] = useState(false);
   const [showHistory, setShowHistory] = useState(false);
   const badged: string[] = current?.unconfirmed_fields ?? [];
@@ -189,7 +197,7 @@ function PolicyCard({ kind, title, hint, fields, current, businessDate, canEdit,
     return (
       <Card>
         <CardHead title={title} />
-        <Empty title="No policy is in force today" hint="The policy epoch starts 2020-01-01." />
+        <Empty title={t('set.noPolicy')} hint={t('set.epoch')} />
       </Card>
     );
   }
@@ -209,7 +217,7 @@ function PolicyCard({ kind, title, hint, fields, current, businessDate, canEdit,
             </Button>
             {canEdit && (
               <Button size="sm" onClick={() => setEditing((e) => !e)} aria-expanded={editing}>
-                {editing ? 'Cancel' : 'Change with effect from…'}
+                {editing ? t('common.cancel') : 'Change with effect from…'}
               </Button>
             )}
           </div>
@@ -221,7 +229,7 @@ function PolicyCard({ kind, title, hint, fields, current, businessDate, canEdit,
           <div key={f.key} className="flex flex-wrap items-start justify-between gap-x-4 gap-y-1 px-4 py-2.5 sm:px-5">
             <div className="min-w-0">
               <dt className="flex flex-wrap items-center gap-2 text-[13.5px] font-medium text-ink-800">
-                {f.label}
+                {t(f.labelKey)}
                 {badged.includes(f.key) && <Badge status="pending">unconfirmed</Badge>}
               </dt>
               {f.note && <p className="mt-0.5 max-w-xl text-[12.5px] text-ink-500">{f.note}</p>}
@@ -250,10 +258,11 @@ function PolicyCard({ kind, title, hint, fields, current, businessDate, canEdit,
 
 function ChangeForm({ kind, fields, current, businessDate, onDone, onError }: {
   kind: PolicyKind;
-  fields: readonly { key: string; label: string; unit: string; note: string }[];
+  fields: readonly { key: string; labelKey: MessageKey; unit: string; note: string }[];
   current: Record<string, any>; businessDate: string;
   onDone: (msg: string) => void; onError: (msg: string) => void;
 }) {
+  const t = useT();
   const firstOfNextMonth = (() => {
     const [y, m] = businessDate.split('-').map(Number);
     return m === 12 ? `${y + 1}-01-01` : `${y}-${String(m + 1).padStart(2, '0')}-01`;
@@ -309,15 +318,15 @@ function ChangeForm({ kind, fields, current, businessDate, onDone, onError }: {
 
   return (
     <form onSubmit={submit} className="border-t border-ink-200 bg-ink-50 p-4 sm:p-5" noValidate>
-      <p className="text-[13.5px] font-semibold text-ink-900">Change with effect from</p>
+      <p className="text-[13.5px] font-semibold text-ink-900">{t('set.changeWithEffect')}</p>
       <p className="mt-0.5 text-[13px] text-ink-500">
         This closes the period in force and creates a successor. The existing period is never
         edited, so past dates keep resolving to the values that were true then.
       </p>
 
       <div className="mt-4 grid gap-4 sm:grid-cols-2">
-        <Field label="Effective from" htmlFor={`${kind}-eff`}
-               hint="Future dates are the normal case — HR usually knows a change is coming.">
+        <Field label={t('mst.effectiveFrom')} htmlFor={`${kind}-eff`}
+               hint={t('set.effectiveFromHint')}>
           <input id={`${kind}-eff`} type="date" required className={inputCls}
                  value={effectiveFrom} onChange={(e) => setEffectiveFrom(e.target.value)} />
         </Field>
@@ -326,14 +335,14 @@ function ChangeForm({ kind, fields, current, businessDate, onDone, onError }: {
                error={reasonMissing ? 'A back-dated change must say why' : undefined}>
           <input id={`${kind}-reason`} type="text" className={inputCls} value={reason}
                  onChange={(e) => setReason(e.target.value)}
-                 placeholder="e.g. HR confirmed the threshold" />
+                 placeholder={t('set.reasonPlaceholder')} />
         </Field>
       </div>
 
       <fieldset className="mt-4">
-        <legend className="text-[13px] font-medium text-ink-700">New values</legend>
+        <legend className="text-[13px] font-medium text-ink-700">{t('set.newValues')}</legend>
         <p className="mt-0.5 text-[12.5px] text-ink-500">
-          Leave a field alone to carry it forward unchanged.
+          {t('set.carryForward')}
         </p>
         <div className="mt-2 grid gap-3 sm:grid-cols-2">
           {fields.map((f) => {
@@ -343,7 +352,7 @@ function ChangeForm({ kind, fields, current, businessDate, onDone, onError }: {
             return (
               <div key={f.key}>
                 <label htmlFor={id} className="block text-[12.5px] text-ink-600">
-                  {f.label} <span className="num text-ink-400">now {fmtVal(cur, f.unit)}</span>
+                  {t(f.labelKey)} <span className="num text-ink-400">now {fmtVal(cur, f.unit)}</span>
                 </label>
                 {f.unit === 'bool' ? (
                   <select id={id} className={inputCls} value={String(Boolean(val))}
@@ -400,7 +409,7 @@ function ChangeForm({ kind, fields, current, businessDate, onDone, onError }: {
           {changed.length === 0 ? 'Change a value to continue' : `Apply ${changed.length} change${changed.length === 1 ? '' : 's'}`}
         </Button>
         <span className="text-[12.5px] text-ink-500">
-          The database rejects an invalid combination even if this form lets it through.
+          {t('set.dbRejects')}
         </span>
       </div>
     </form>
@@ -411,47 +420,48 @@ function ChangeForm({ kind, fields, current, businessDate, onDone, onError }: {
 
 function PolicyHistory({ kind, fields }: {
   kind: PolicyKind;
-  fields: readonly { key: string; label: string; unit: string; note: string }[];
+  fields: readonly { key: string; labelKey: MessageKey; unit: string; note: string }[];
 }) {
+  const t = useT();
   const state = useData<History>(`/settings/policy/${kind}/history`);
 
   return (
     <div className="border-t border-ink-200 bg-ink-50">
       <div className="px-4 pt-4 sm:px-5">
-        <p className="text-[13.5px] font-semibold text-ink-900">Version history</p>
+        <p className="text-[13.5px] font-semibold text-ink-900">{t('set.versionHistory')}</p>
         <p className="mt-0.5 max-w-2xl text-[13px] text-ink-500">
           This is what answers “why was I marked half-day in March” — the March version is still
           here, unchanged.
         </p>
       </div>
       <Async state={state} rows={3} isEmpty={(h) => h.versions.length === 0}
-             empty={<Empty title="No history yet" />}>
+             empty={<Empty title={t('set.noHistory')} />}>
         {(h) => (
           <div className="overflow-x-auto p-4 sm:p-5">
-            <table className="w-full min-w-[42rem] text-left text-[13px]">
+            <table className="w-full min-w-[42rem] text-start text-[13px]">
               <thead className="text-[12px] uppercase tracking-wide text-ink-400">
                 <tr>
-                  <th scope="col" className="py-2 pr-3 font-medium">Effective</th>
+                  <th scope="col" className="py-2 pe-3 font-medium">{t('set.effective')}</th>
                   {fields.map((f) => (
-                    <th key={f.key} scope="col" className="py-2 pr-3 font-medium">{f.label}</th>
+                    <th key={f.key} scope="col" className="py-2 pe-3 font-medium">{t(f.labelKey)}</th>
                   ))}
-                  <th scope="col" className="py-2 pr-3 font-medium">Changed by</th>
-                  <th scope="col" className="py-2 font-medium">Reason</th>
+                  <th scope="col" className="py-2 pe-3 font-medium">{t('set.changedBy')}</th>
+                  <th scope="col" className="py-2 font-medium">{t('leave.reason')}</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-ink-200">
                 {h.versions.map((v) => (
                   <tr key={v.id} className={v.valid_to === null ? 'bg-white' : ''}>
-                    <td className="num whitespace-nowrap py-2 pr-3 text-ink-800">
+                    <td className="num whitespace-nowrap py-2 pe-3 text-ink-800">
                       {fmtDate(v.valid_from)} → {v.valid_to ? fmtDate(v.valid_to) : 'open'}
-                      {v.valid_to === null && <Badge status="present" className="ml-2">current</Badge>}
+                      {v.valid_to === null && <Badge status="present" className="ms-2">current</Badge>}
                     </td>
                     {fields.map((f) => (
-                      <td key={f.key} className="num py-2 pr-3 text-ink-700">
+                      <td key={f.key} className="num py-2 pe-3 text-ink-700">
                         {fmtVal(v[f.key], f.unit)}
                       </td>
                     ))}
-                    <td className="py-2 pr-3 text-ink-600">{v.created_by_name ?? 'system seed'}</td>
+                    <td className="py-2 pe-3 text-ink-600">{v.created_by_name ?? 'system seed'}</td>
                     <td className="py-2 text-ink-600">{v.reason ?? '—'}</td>
                   </tr>
                 ))}
@@ -467,26 +477,27 @@ function PolicyHistory({ kind, fields }: {
 // ---------------------------------------------------------------------------
 
 function LeaveCard({ leave }: { leave: Record<string, any>[] }) {
+  const t = useT();
   return (
     <Card>
       <CardHead
-        title="Leave policy"
-        hint="Read-only here. Leave types are a collection with their own admin screen, not a scalar setting."
+        title={t('set.leavePolicy')}
+        hint={t('set.leavePolicyHint')}
       />
       {leave.length === 0 ? (
-        <Empty title="No leave policy in force" />
+        <Empty title={t('set.noLeavePolicy')} />
       ) : (
         <div className="overflow-x-auto">
-          <table className="w-full min-w-[46rem] text-left text-[13px]">
+          <table className="w-full min-w-[46rem] text-start text-[13px]">
             <thead className="border-b border-ink-100 text-[12px] uppercase tracking-wide text-ink-400">
               <tr>
-                <th scope="col" className="px-5 py-2.5 font-medium">Type</th>
-                <th scope="col" className="px-3 py-2.5 font-medium">Per year</th>
-                <th scope="col" className="px-3 py-2.5 font-medium">On probation</th>
-                <th scope="col" className="px-3 py-2.5 font-medium">Usage cap</th>
-                <th scope="col" className="px-3 py-2.5 font-medium">Carry-forward</th>
-                <th scope="col" className="px-3 py-2.5 font-medium">Sandwich</th>
-                <th scope="col" className="px-5 py-2.5 font-medium">Unconfirmed</th>
+                <th scope="col" className="px-5 py-2.5 font-medium">{t('leave.type')}</th>
+                <th scope="col" className="px-3 py-2.5 font-medium">{t('set.perYear')}</th>
+                <th scope="col" className="px-3 py-2.5 font-medium">{t('set.onProbation')}</th>
+                <th scope="col" className="px-3 py-2.5 font-medium">{t('set.usageCap')}</th>
+                <th scope="col" className="px-3 py-2.5 font-medium">{t('set.carryForwardCol')}</th>
+                <th scope="col" className="px-3 py-2.5 font-medium">{t('set.sandwich')}</th>
+                <th scope="col" className="px-5 py-2.5 font-medium">{t('set.unconfirmed')}</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-ink-100">
@@ -532,6 +543,7 @@ function MutableSettings({ rows, canEdit, onSaved, onError }: {
   rows: Settings['settings']; canEdit: boolean;
   onSaved: (msg: string) => void; onError: (msg: string) => void;
 }) {
+  const t = useT();
   const [draft, setDraft] = useState<Record<string, any>>({});
   const [busyKey, setBusyKey] = useState<string | null>(null);
 
@@ -547,7 +559,7 @@ function MutableSettings({ rows, canEdit, onSaved, onError }: {
       setDraft((s) => { const n = { ...s }; delete n[key]; return n; });
       onSaved('Setting saved');
     } catch (err) {
-      onError(err instanceof ApiError ? err.message : 'Could not save');
+      onError(err instanceof ApiError ? err.message : t('work.couldNotSave'));
     } finally {
       setBusyKey(null);
     }
@@ -557,8 +569,8 @@ function MutableSettings({ rows, canEdit, onSaved, onError }: {
     <div className="space-y-5">
       <Card>
         <CardHead
-          title="Mutable settings"
-          hint="Nothing computes history from these, so a plain edit is correct. Changes are audited but not versioned."
+          title={t('set.mutable')}
+          hint={t('set.mutableHint')}
         />
         {groups.map((g) => (
           <div key={g}>
@@ -574,6 +586,8 @@ function MutableSettings({ rows, canEdit, onSaved, onError }: {
                   <div key={r.key} className="flex flex-wrap items-start justify-between gap-x-4 gap-y-2 px-4 py-3 sm:px-5">
                     <div className="min-w-0 flex-1">
                       <dt>
+                        {/* `r.label` comes from org_setting - database content, not a UI string. Translating
+    it here would mean shipping a dictionary of row values. Left as the API sends it. */}
                         <label htmlFor={id} className="text-[13.5px] font-medium text-ink-800">{r.label}</label>
                       </dt>
                       <p className="num mt-0.5 text-[12px] text-ink-400">{r.key}</p>
@@ -594,7 +608,7 @@ function MutableSettings({ rows, canEdit, onSaved, onError }: {
                       )}
                       {canEdit && dirty && (
                         <Button size="sm" busy={busyKey === r.key} onClick={() => save(r.key, r.value_type)}>
-                          Save
+                          {t('common.save')}
                         </Button>
                       )}
                     </dd>
@@ -607,7 +621,7 @@ function MutableSettings({ rows, canEdit, onSaved, onError }: {
       </Card>
 
       <p className="text-[12.5px] text-ink-500">
-        <strong className="font-semibold text-ink-700">Note:</strong> the business timezone sits here
+        <strong className="font-semibold text-ink-700">{t('leave.note')}</strong> the business timezone sits here
         as a mutable setting, but changing it re-attributes punches — so it arguably belongs in the
         effective-dated class. That reclassification is a recorded open item, not an oversight.
       </p>

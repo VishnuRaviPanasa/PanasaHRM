@@ -3,11 +3,13 @@
 import Link from 'next/link';
 import { useState } from 'react';
 import { useParams } from 'next/navigation';
-import { fmtDate, hasRole, useData, type Actor } from '@/lib/api';
-import { Async, Badge, Button, Card, CardHead, Empty, Stat } from '@/components/ui';
+import { fmtDate, hasRole, hm, useBusinessDate, useData, type Actor } from '@/lib/api';
+import { Async, Badge, Button, Card, CardHead, Empty, Stat, Toast } from '@/components/ui';
 import { DocumentList, type Doc } from '@/components/documents';
 import { AddPayslip, PayslipDetail, PayslipList } from '@/components/payslips';
 import { ChangeAssignment } from '@/components/employee-master';
+import { WorkEntryForm } from '@/components/work-entry';
+import { useT } from '@/lib/i18n';
 
 interface Profile {
   /** True when this record belongs to the caller. Only then does `personal` come back. */
@@ -53,6 +55,7 @@ function Detail({ label, value }: { label: string; value: React.ReactNode }) {
  * a report simply does not see it, without this component knowing why.
  */
 function DocumentsCard({ employeeId, isHr }: { employeeId: string; isHr: boolean }) {
+  const t = useT();
   const state = useData<{ documents: Doc[] }>(`/documents?employeeId=${employeeId}`, [employeeId]);
   const docs = state.data?.documents ?? [];
 
@@ -64,13 +67,13 @@ function DocumentsCard({ employeeId, isHr }: { employeeId: string; isHr: boolean
     <Card className="scroll-mt-20" >
       <div id="documents" />
       <CardHead
-        title="Documents"
+        title={t('docs.title')}
         hint={isHr
           ? 'Filed against this employee. Uploads are scanned before they become available.'
           : 'Your filed documents.'}
         action={
           <Link href="/documents" className="text-[13px] font-medium text-brand-700 hover:underline">
-            Manage
+            {t('ep.manage')}
           </Link>
         }
       />
@@ -96,6 +99,7 @@ function DocumentsCard({ employeeId, isHr }: { employeeId: string; isHr: boolean
 function PayslipsCard({ employeeId, employeeName, isHrAdmin }: {
   employeeId: string; employeeName: string; isHrAdmin: boolean;
 }) {
+  const t = useT();
   const [mode, setMode] = useState<'list' | 'add'>('list');
   const [open, setOpen] = useState<string | null>(null);
   const [reloadKey, setReloadKey] = useState(0);
@@ -126,17 +130,99 @@ function PayslipsCard({ employeeId, employeeName, isHrAdmin }: {
   return (
     <Card className="scroll-mt-20">
       <CardHead
-        title="Payslips"
-        hint="Figures are entered from a finalised payroll result — nothing here is calculated."
-        action={<Button size="sm" onClick={() => setMode('add')}>Add payslip</Button>}
+        title={t('nav.payslips')}
+        hint={t('ep.payslipsHint')}
+        action={<Button size="sm" onClick={() => setMode('add')}>{t('ep.addPayslip')}</Button>}
       />
       <div key={reloadKey}>
         <PayslipList
           employeeId={employeeId}
           onOpen={setOpen}
-          emptyHint="No payslips have been recorded for this employee yet."
+          emptyHint={t('ep.noPayslips')}
         />
       </div>
+    </Card>
+  );
+}
+
+/**
+ * HR recording a work log for THIS employee.
+ *
+ * This is where the employee picker that used to sit on `/work` went. That screen is named for
+ * the signed-in person, so a dropdown of colleagues on it made "My work" mean whatever the
+ * dropdown said - and it retitled itself to "Work log" when one was chosen. Here the employee is
+ * already the subject of the page, so there is nothing to pick and nothing to mistake.
+ *
+ * `isHrAdmin` gates what is SHOWN, not what is permitted: `POST /work-log` refuses an
+ * `employeeId` from anybody without `work.log.write_for`, whatever this component renders. The
+ * entry is stored with `entry_source = 'hr_entry'` and the recorder's id (migration 0028), and
+ * the employee sees "Recorded by ..." against it on their own `/work` screen.
+ */
+function WorkLogCard({ employeeId, employeeName, isHrAdmin }: {
+  employeeId: string; employeeName: string; isHrAdmin: boolean;
+}) {
+  const t = useT();
+  const [open, setOpen] = useState(false);
+  const [date, setDate] = useState('');
+  const [toast, setToast] = useState<string | null>(null);
+  const businessDate = useBusinessDate();
+
+  if (!isHrAdmin) return null;
+
+  return (
+    <Card className="scroll-mt-20">
+      <CardHead
+        title={t('ep.workLog')}
+        hint={t('ep.workLogHint')}
+        action={!open
+          ? (
+            <Button
+              size="sm"
+              disabled={!businessDate}
+              // Seeded here rather than in state: the business date is not known on first render,
+              // so initialising from it would leave the input blank until something else moved.
+              onClick={() => { setDate((d) => d || businessDate || ''); setOpen(true); }}
+            >
+              {t('ep.addWorkLog')}
+            </Button>
+          )
+          : undefined}
+      />
+      {open && businessDate ? (
+        <>
+          {/*
+            * The date is its own control rather than a fixed "today": HR is usually catching up
+            * on a day that has already passed, which is the whole reason the entry is being made
+            * for somebody else. It seeds from the SERVER's business date - never the browser's.
+            */}
+          <div className="border-b border-ink-100 px-4 py-3 sm:px-5">
+            <label htmlFor="hr-wl-date" className="text-[12px] font-medium text-ink-600">
+              {t('common.date')}
+            </label>
+            <input
+              id="hr-wl-date" type="date" value={date} max={businessDate}
+              onChange={(ev) => setDate(ev.target.value)}
+              className="ms-2 rounded-lg border-0 bg-white px-2.5 py-1 text-[13.5px] ring-1 ring-inset ring-ink-300 focus:ring-2 focus:ring-inset focus:ring-ink-900"
+            />
+            <p className="mt-1 text-[12.5px] text-ink-500">
+              {t('ep.recordingFor', { name: employeeName })}
+            </p>
+          </div>
+          <WorkEntryForm
+            employeeId={employeeId}
+            date={date || businessDate}
+            idPrefix="hr-wl"
+            onSaved={(mins) => {
+              setToast(t('work.loggedFor', { amount: hm(mins), name: employeeName }));
+              setOpen(false);
+            }}
+            onCancel={() => setOpen(false)}
+          />
+        </>
+      ) : (
+        <Empty title={t('ep.noWorkLogYet')} hint={t('ep.workLogEmptyHint')} />
+      )}
+      {toast && <Toast message={toast} tone="good" onDone={() => setToast(null)} />}
     </Card>
   );
 }
@@ -154,6 +240,7 @@ function AssignmentCard({ employeeId, employeeName, current, onDone }: {
   current: { department?: string | null; designation?: string | null; manager?: string | null };
   onDone: () => void;
 }) {
+  const t = useT();
   const [open, setOpen] = useState(false);
 
   if (open) {
@@ -171,9 +258,9 @@ function AssignmentCard({ employeeId, employeeName, current, onDone }: {
   return (
     <Card>
       <CardHead
-        title="Assignment"
-        hint="Transfers and promotions are recorded with a date, so earlier reports keep resolving to the earlier structure."
-        action={<Button size="sm" onClick={() => setOpen(true)}>Change assignment</Button>}
+        title={t('ep.assignment')}
+        hint={t('ep.assignmentHint')}
+        action={<Button size="sm" onClick={() => setOpen(true)}>{t('ep.changeAssignment')}</Button>}
       />
       <p className="text-[13px] text-ink-600">
         Currently{' '}
@@ -186,6 +273,7 @@ function AssignmentCard({ employeeId, employeeName, current, onDone }: {
 }
 
 export default function EmployeeProfilePage() {
+  const t = useT();
   const { id } = useParams<{ id: string }>();
   const state = useData<Profile>(`/employees/${id}`);
   const me = useData<{ actor: Actor }>('/auth/me');
@@ -194,7 +282,7 @@ export default function EmployeeProfilePage() {
   return (
     <div className="space-y-5">
       <Link href="/employees" className="inline-flex items-center gap-1 text-[13px] font-medium text-brand-700 hover:underline">
-        <span aria-hidden>←</span> All employees
+        <span aria-hidden>←</span> {t('ep.allEmployees')}
       </Link>
 
       <Async state={state} rows={6}>
@@ -219,48 +307,48 @@ export default function EmployeeProfilePage() {
                 <Badge status={e.status} />
               </div>
 
-              <section aria-label="Attendance this month" className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-                <Stat label="Present" value={att.present} tone="good" sub="this month" />
-                <Stat label="WFH" value={att.wfh} tone="brand" sub="this month" />
-                <Stat label="Late" value={att.late} tone="warn" sub="this month" />
-                <Stat label="Absent" value={att.absent} tone={Number(att.absent) > 0 ? 'bad' : 'plain'} sub="this month" />
+              <section aria-label={t('ep.attendanceThisMonth')} className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+                <Stat label={t('attendance.present')} value={att.present} tone="good" sub={t('ep.thisMonth')} />
+                <Stat label={t('attendance.wfh')} value={att.wfh} tone="brand" sub={t('ep.thisMonth')} />
+                <Stat label={t('attendance.late')} value={att.late} tone="warn" sub={t('ep.thisMonth')} />
+                <Stat label={t('attendance.absent')} value={att.absent} tone={Number(att.absent) > 0 ? 'bad' : 'plain'} sub={t('ep.thisMonth')} />
               </section>
 
               <div className="grid gap-5 lg:grid-cols-3">
                 <Card className="lg:col-span-2">
-                  <CardHead title="Employee information" />
+                  <CardHead title={t('ep.info')} />
                   <dl className="grid grid-cols-2 gap-4 p-4 sm:grid-cols-3 sm:p-5">
-                    <Detail label="Employee number" value={<span className="num">{e.employee_number}</span>} />
-                    <Detail label="Work email" value={e.work_email} />
-                    <Detail label="Department" value={e.department} />
-                    <Detail label="Designation" value={e.designation} />
-                    <Detail label="Reporting manager" value={e.manager ?? 'No manager (top of chain)'} />
-                    <Detail label="Joined on" value={fmtDate(e.joined_on)} />
-                    <Detail label="Confirmed on" value={fmtDate(e.confirmed_on)} />
-                    <Detail label="Employment type" value={e.employment_type?.replace('_', ' ')} />
-                    <Detail label="Work location" value={e.work_location} />
-                    <Detail label="In current role since" value={fmtDate(e.assignment_since)} />
+                    <Detail label={t('ep.employeeNumber')} value={<span className="num">{e.employee_number}</span>} />
+                    <Detail label={t('login.email')} value={e.work_email} />
+                    <Detail label={t('emp.department')} value={e.department} />
+                    <Detail label={t('emp.designation')} value={e.designation} />
+                    <Detail label={t('ep.reportingManager')} value={e.manager ?? 'No manager (top of chain)'} />
+                    <Detail label={t('ep.joinedOn')} value={fmtDate(e.joined_on)} />
+                    <Detail label={t('ep.confirmedOn')} value={fmtDate(e.confirmed_on)} />
+                    <Detail label={t('ep.employmentType')} value={e.employment_type?.replace('_', ' ')} />
+                    <Detail label={t('ep.workLocation')} value={e.work_location} />
+                    <Detail label={t('ep.inRoleSince')} value={fmtDate(e.assignment_since)} />
 
                     {/* Personal detail is the subject's own. It is absent from the response for
                         anyone else, so there is no client-side gate here to get wrong. */}
                     {d.personal && (
                       <>
-                        <Detail label="Phone" value={d.personal.personal_phone} />
-                        <Detail label="Date of birth" value={fmtDate(d.personal.date_of_birth)} />
-                        <Detail label="Gender" value={d.personal.gender} />
+                        <Detail label={t('ep.phone')} value={d.personal.personal_phone} />
+                        <Detail label={t('ep.dob')} value={fmtDate(d.personal.date_of_birth)} />
+                        <Detail label={t('ep.gender')} value={d.personal.gender} />
                       </>
                     )}
                   </dl>
                   {!d.isSelf && (
                     <p className="border-t border-ink-100 px-4 py-3 text-[12.5px] text-ink-500 sm:px-5">
-                      Personal contact details are visible only to the employee themselves.
+                      {t('ep.privateNote')}
                     </p>
                   )}
                 </Card>
 
                 <div className="space-y-5">
                   <Card>
-                    <CardHead title="Leave balance" hint="Folded from the ledger" />
+                    <CardHead title={t('ep.leaveBalance')} hint={t('ep.foldedFromLedger')} />
                     <ul className="divide-y divide-ink-100">
                       {d.balances.map((b) => (
                         <li key={b.code} className="flex items-center justify-between px-4 py-2.5 sm:px-5">
@@ -275,9 +363,9 @@ export default function EmployeeProfilePage() {
                   </Card>
 
                   <Card>
-                    <CardHead title="Projects" />
+                    <CardHead title={t('ep.projects')} />
                     {d.projects.length === 0 ? (
-                      <Empty title="Not assigned to any project" />
+                      <Empty title={t('ep.noProjects')} />
                     ) : (
                       <ul className="divide-y divide-ink-100">
                         {d.projects.map((p) => (
@@ -298,14 +386,18 @@ export default function EmployeeProfilePage() {
               {/* THE point of effective dating. Not "current values" - the whole timeline. */}
               <Card>
                 <CardHead
-                  title="Assignment history"
-                  hint="Every change created a new period. Nothing was overwritten, so the org can be reconstructed as it was on any past date."
+                  title={t('ep.history')}
+                  hint={t('ep.historyHint')}
                 />
                 <ol className="p-4 sm:p-5">
                   {d.history.map((h, i) => (
                     <li key={h.valid_from} className="relative flex gap-4 pb-5 last:pb-0">
+                      {/*
+                        * The timeline spine. `start-`, not `left-`: the dots it connects sit at
+                        * the start of each row, so in Arabic both move to the right together.
+                        */}
                       {i < d.history.length - 1 && (
-                        <span aria-hidden className="absolute left-[5px] top-4 h-full w-px bg-ink-200" />
+                        <span aria-hidden className="absolute start-[5px] top-4 h-full w-px bg-ink-200" />
                       )}
                       <span
                         aria-hidden
@@ -342,6 +434,12 @@ export default function EmployeeProfilePage() {
                   onDone={() => state.reload()}
                 />
               )}
+
+              <WorkLogCard
+                employeeId={e.id}
+                employeeName={e.full_name}
+                isHrAdmin={hasRole(me.data?.actor, 'hr_admin')}
+              />
 
               <PayslipsCard
                 employeeId={e.id}

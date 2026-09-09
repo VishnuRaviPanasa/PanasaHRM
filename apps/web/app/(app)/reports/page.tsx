@@ -1,8 +1,9 @@
 'use client';
 
-import { useState } from 'react';
-import { decimalHours, fmtDate, fmtDateShort, hm, useData } from '@/lib/api';
+import { useEffect, useState } from 'react';
+import { decimalHours, fmtDate, fmtDateShort, hm, useBusinessDate, useData } from '@/lib/api';
 import { Async, Badge, Bar, Card, CardHead, Empty, Stat } from '@/components/ui';
+import { useT, type MessageKey } from '@/lib/i18n';
 
 /**
  * HR reporting.
@@ -24,30 +25,37 @@ import { Async, Badge, Bar, Card, CardHead, Empty, Stat } from '@/components/ui'
 type Tab = 'headcount' | 'attendance' | 'leave' | 'wfh' | 'reconciliation' | 'timesheets'
   | 'documents' | 'tasks' | 'effort';
 
-const TABS: { id: Tab; label: string; blurb: string }[] = [
-  { id: 'headcount', label: 'Headcount', blurb: 'Joiners, leavers, confirmations and promotions in the period.' },
-  { id: 'attendance', label: 'Attendance', blurb: 'Present, late, WFH, absent and leave days, with the time actually worked.' },
-  { id: 'leave', label: 'Leave liability', blurb: 'Outstanding balance by leave type. Paid and unpaid are never summed together.' },
-  { id: 'wfh', label: 'Work from home', blurb: 'WFH counted from attendance and from approved leave - both, separately.' },
-  { id: 'reconciliation', label: 'Attendance vs work logs', blurb: 'Days where time attended and effort logged disagree.' },
-  { id: 'timesheets', label: 'Timesheets', blurb: 'Which periods are submitted, approved, or still waiting on somebody.' },
-  { id: 'documents', label: 'Documents', blurb: 'Filing posture: how many types on file, awaiting scan, expiring or expired.' },
+/*
+ * KEYS, not text: this is a module-level constant, so it has no component to bind a
+ * hook to and cannot call t(). Resolved where the tab strip renders.
+ */
+const TABS: { id: Tab; labelKey: MessageKey; blurbKey: MessageKey }[] = [
+  { id: 'headcount', labelKey: 'rep.headcount', blurbKey: 'rep.blurb.headcount' },
+  { id: 'attendance', labelKey: 'attendance.title', blurbKey: 'rep.blurb.attendance' },
+  { id: 'leave', labelKey: 'rep.leaveLiability', blurbKey: 'rep.blurb.leave' },
+  { id: 'wfh', labelKey: 'dash.wfh', blurbKey: 'rep.blurb.wfh' },
+  { id: 'reconciliation', labelKey: 'rep.attendanceVsWork', blurbKey: 'rep.blurb.reconciliation' },
+  { id: 'timesheets', labelKey: 'common.timesheets', blurbKey: 'rep.blurb.timesheets' },
+  { id: 'documents', labelKey: 'docs.title', blurbKey: 'rep.blurb.documents' },
   // "Project tasks", because the glossary also uses Task for a single workflow approval step.
-  { id: 'tasks', label: 'Project tasks', blurb: 'Task load by assignee and by project, including work nobody is assigned to.' },
-  { id: 'effort', label: 'Effort', blurb: 'Where logged time went, by project and by person.' },
+  { id: 'tasks', labelKey: 'rep.projectTasks', blurbKey: 'rep.blurb.tasks' },
+  { id: 'effort', labelKey: 'rep.effort', blurbKey: 'rep.blurb.effort' },
 ];
 
 /** A scrollable table. A wide report must scroll inside its own box, never the page. */
 function Table({ head, children }: { head: string[]; children: React.ReactNode }) {
   return (
     <div className="overflow-x-auto">
-      <table className="w-full min-w-[38rem] text-left text-[13.5px]">
+      <table className="w-full min-w-[38rem] text-start text-[13.5px]">
         <thead>
           <tr className="border-b border-ink-200">
             {head.map((h, i) => (
+              // scope="col" on every header: this one helper renders every report table, so the
+              // whole screen was announcing cells without their column to a screen reader.
               <th
                 key={h}
-                className={`px-3 py-2 text-[12px] font-medium uppercase tracking-wide text-ink-400 ${i > 0 ? 'text-right' : ''}`}
+                scope="col"
+                className={`px-3 py-2 text-[12px] font-medium uppercase tracking-wide text-ink-400 ${i > 0 ? 'text-end' : ''}`}
               >
                 {h}
               </th>
@@ -70,16 +78,34 @@ function Person({ name, num }: { name: string; num: string }) {
 }
 
 function N({ children, tone = '' }: { children: React.ReactNode; tone?: string }) {
-  return <td className={`num px-3 py-2 text-right ${tone || 'text-ink-700'}`}>{children}</td>;
+  return <td className={`num px-3 py-2 text-end ${tone || 'text-ink-700'}`}>{children}</td>;
 }
 
 // ---------------------------------------------------------------------------
 
 export default function ReportsPage() {
-  const today = new Date().toISOString().slice(0, 10);
-  const [from, setFrom] = useState(`${today.slice(0, 7)}-01`);
-  const [to, setTo] = useState(today);
-  const [year, setYear] = useState(Number(today.slice(0, 4)));
+  const t = useT();
+  /*
+   * The default window follows the SERVER's business date, not the browser's UTC date.
+   *
+   * `new Date().toISOString().slice(0, 10)` was cutting the current day out of every
+   * report between midnight and 05:30 IST, and on the 1st of January it also picked the
+   * previous year for the annual reports. The state starts empty and is filled once the
+   * date arrives, so the first render asks for nothing rather than asking about the
+   * wrong period.
+   */
+  const today = useBusinessDate();
+  const [from, setFrom] = useState('');
+  const [to, setTo] = useState('');
+  const [year, setYear] = useState(0);
+
+  useEffect(() => {
+    if (!today) return;
+    // Only seeds the defaults - a range the person has already chosen is never overwritten.
+    setFrom((v) => v || `${today.slice(0, 7)}-01`);
+    setTo((v) => v || today);
+    setYear((v) => v || Number(today.slice(0, 4)));
+  }, [today]);
   const [tab, setTab] = useState<Tab>('attendance');
 
   const index = useData<{ available: string[] }>('/reports');
@@ -88,16 +114,16 @@ export default function ReportsPage() {
   // `effort` shares `work.log.read` with the reconciliation report rather than holding an action
   // of its own, so it is offered exactly when that one is.
   const offered = index.data?.available ?? [];
-  const visible = TABS.filter((t) => (
-    t.id === 'effort' ? offered.includes('reconciliation') : offered.includes(t.id)
+  const visible = TABS.filter((tab_) => (
+    tab_.id === 'effort' ? offered.includes('reconciliation') : offered.includes(tab_.id)
   ));
-  const active = visible.some((t) => t.id === tab) ? tab : visible[0]?.id;
-  const meta = TABS.find((t) => t.id === active);
+  const active = visible.some((tab_) => tab_.id === tab) ? tab : visible[0]?.id;
+  const meta = TABS.find((tab_) => tab_.id === active);
 
   return (
     <div className="space-y-5">
       <div>
-        <h1 className="text-[21px] font-semibold text-ink-900">Reports</h1>
+        <h1 className="text-[21px] font-semibold text-ink-900">{t('rep.title')}</h1>
         <p className="mt-0.5 text-[13.5px] text-ink-500">
           Every figure below covers only the people you are permitted to see - your own record,
           your team, or the organisation.
@@ -108,34 +134,34 @@ export default function ReportsPage() {
         {() => (visible.length === 0 ? (
           <Card>
             <Empty
-              title="No reports are available to you"
-              hint="Reports follow the same permissions as the screens they summarise."
+              title={t('rep.none')}
+              hint={t('rep.noneHint')}
             />
           </Card>
         ) : (
           <div className="space-y-5">
             <div className="flex flex-wrap items-end justify-between gap-3">
-              <nav className="flex flex-wrap gap-1.5" aria-label="Report">
-                {visible.map((t) => (
+              <nav className="flex flex-wrap gap-1.5" aria-label={t('rep.report')}>
+                {visible.map((tab_) => (
                   <button
-                    key={t.id}
+                    key={tab_.id}
                     type="button"
-                    onClick={() => setTab(t.id)}
-                    aria-current={active === t.id ? 'page' : undefined}
+                    onClick={() => setTab(tab_.id)}
+                    aria-current={active === tab_.id ? 'page' : undefined}
                     className={`rounded-lg px-3 py-1.5 text-[13px] font-medium transition ${
-                      active === t.id
+                      active === tab_.id
                         ? 'bg-brand-600 text-white'
                         : 'bg-white text-ink-600 ring-1 ring-inset ring-ink-200 hover:bg-ink-50'
                     }`}
                   >
-                    {t.label}
+                    {t(tab_.labelKey)}
                   </button>
                 ))}
               </nav>
 
               {active === 'leave' && (
                 <label className="flex items-center gap-2 text-[13px] text-ink-500">
-                  Year
+                  {t('rep.year')}
                   <input
                     type="number"
                     min={2000}
@@ -154,7 +180,7 @@ export default function ReportsPage() {
                     value={from}
                     max={to}
                     onChange={(e) => setFrom(e.target.value)}
-                    aria-label="From"
+                    aria-label={t('leave.from')}
                     className="num rounded-lg border border-ink-200 px-2.5 py-1.5 text-[13.5px]"
                   />
                   <span>to</span>
@@ -163,14 +189,14 @@ export default function ReportsPage() {
                     value={to}
                     min={from}
                     onChange={(e) => setTo(e.target.value)}
-                    aria-label="To"
+                    aria-label={t('leave.to')}
                     className="num rounded-lg border border-ink-200 px-2.5 py-1.5 text-[13.5px]"
                   />
                 </div>
               )}
             </div>
 
-            {meta && <p className="text-[13px] text-ink-500">{meta.blurb}</p>}
+            {meta && <p className="text-[13px] text-ink-500">{t(meta.blurbKey)}</p>}
 
             {active === 'headcount' && <Headcount range={range} />}
             {active === 'attendance' && <Attendance range={range} />}
@@ -190,14 +216,22 @@ export default function ReportsPage() {
 
 // ---------------------------------------------------------------------------
 
-const EVENT_LABEL: Record<string, string> = {
-  joined: 'Joined',
-  confirmed: 'Confirmed',
-  promoted: 'Promoted',
-  transferred: 'Transferred',
-  resigned: 'Resigned',
-  exited: 'Exited',
-  probation_extended: 'Probation extended',
+/*
+ * Event code -> MESSAGE KEY, not text.
+ *
+ * A module-level constant has no component to bind a hook to, so t() cannot be called
+ * here - the substitution pass put calls in this object and the build caught it. The keys
+ * are resolved where a row renders. The event codes themselves are API values and are
+ * never translated.
+ */
+const EVENT_LABEL: Record<string, MessageKey> = {
+  joined: 'emp.joined',
+  confirmed: 'rep.confirmed',
+  promoted: 'rep.promoted',
+  transferred: 'ev.transferred',
+  resigned: 'rep.resigned',
+  exited: 'rep.exited',
+  probation_extended: 'ev.probationExtended',
 };
 
 interface MovementRow {
@@ -206,6 +240,7 @@ interface MovementRow {
 }
 
 function Headcount({ range }: { range: string }) {
+  const t = useT();
   const s = useData<{
     from: string; to: string; movement: MovementRow[];
     summary: {
@@ -222,8 +257,8 @@ function Headcount({ range }: { range: string }) {
       empty={(
         <Card>
           <Empty
-            title="Nobody joined or left in this period"
-            hint="Widen the date range to see earlier movement."
+            title={t('rep.noMovement')}
+            hint={t('rep.noMovementHint')}
           />
         </Card>
       )}
@@ -231,21 +266,21 @@ function Headcount({ range }: { range: string }) {
       {(d) => (
         <div className="space-y-4">
           <section className="grid grid-cols-2 gap-3 sm:grid-cols-5">
-            <Stat label="Joined" value={d.summary?.joiners ?? 0} tone="good" />
-            <Stat label="Confirmed" value={d.summary?.confirmations ?? 0} />
-            <Stat label="Promoted" value={d.summary?.promotions ?? 0} tone="brand" />
-            <Stat label="Resigned" value={d.summary?.resignations ?? 0} tone="warn" />
-            <Stat label="Exited" value={d.summary?.leavers ?? 0} tone="bad" />
+            <Stat label={t('emp.joined')} value={d.summary?.joiners ?? 0} tone="good" />
+            <Stat label={t('rep.confirmed')} value={d.summary?.confirmations ?? 0} />
+            <Stat label={t('rep.promoted')} value={d.summary?.promotions ?? 0} tone="brand" />
+            <Stat label={t('rep.resigned')} value={d.summary?.resignations ?? 0} tone="warn" />
+            <Stat label={t('rep.exited')} value={d.summary?.leavers ?? 0} tone="bad" />
           </section>
           <Card>
-            <CardHead title="Movement" hint={`${fmtDateShort(d.from)} - ${fmtDateShort(d.to)}`} />
-            <Table head={['Employee', 'Event', 'Effective', 'Department', 'Designation']}>
+            <CardHead title={t('rep.movement')} hint={`${fmtDateShort(d.from)} - ${fmtDateShort(d.to)}`} />
+            <Table head={[t('common.employee'), 'Event', t('set.effective'), t('emp.department'), t('emp.designation')]}>
               {d.movement.map((m, i) => (
                 <tr key={`${m.employee_number}-${m.event_type}-${m.effective_on}-${i}`}>
                   <Person name={m.full_name} num={m.employee_number} />
-                  <td className="px-3 py-2 text-right">
+                  <td className="px-3 py-2 text-end">
                     <Badge status={m.event_type === 'exited' ? 'absent' : m.event_type === 'resigned' ? 'late' : 'approved'}>
-                      {EVENT_LABEL[m.event_type] ?? m.event_type.replace(/_/g, ' ')}
+                      {EVENT_LABEL[m.event_type] ? t(EVENT_LABEL[m.event_type]) : m.event_type.replace(/_/g, ' ')}
                       {m.exit_type ? ` - ${m.exit_type}` : ''}
                     </Badge>
                   </td>
@@ -269,6 +304,7 @@ interface AttendanceRow {
 }
 
 function Attendance({ range }: { range: string }) {
+  const t = useT();
   const s = useData<{ from: string; to: string; rows: AttendanceRow[] }>(
     `/reports/attendance${range}`, [range]);
 
@@ -280,14 +316,15 @@ function Attendance({ range }: { range: string }) {
       empty={(
         <Card>
           <Empty
-            title="No attendance in this period"
-            hint="Only people with recorded attendance appear in this report."
+            title={t('rep.noAttendance')}
+            hint={t('rep.noAttendanceHint')}
           />
         </Card>
       )}
     >
       {(d) => {
-        const t = d.rows.reduce((a, r) => ({
+        // `tot`, not `t`: the translate function is in scope here and one name cannot be both.
+        const tot = d.rows.reduce((a, r) => ({
           present: a.present + Number(r.present_days),
           late: a.late + Number(r.late_days),
           absent: a.absent + Number(r.absent_days),
@@ -297,14 +334,14 @@ function Attendance({ range }: { range: string }) {
         return (
           <div className="space-y-4">
             <section className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-              <Stat label="Present days" value={t.present} tone="good" />
-              <Stat label="Late arrivals" value={t.late} tone={t.late > 0 ? 'warn' : 'plain'} />
-              <Stat label="Absent days" value={t.absent} tone={t.absent > 0 ? 'bad' : 'plain'} />
-              <Stat label="Time worked" value={hm(t.worked)} sub={`${decimalHours(t.worked)} decimal hours`} />
+              <Stat label={t('rep.presentDays')} value={tot.present} tone="good" />
+              <Stat label={t('dash.lateArrivals')} value={tot.late} tone={tot.late > 0 ? 'warn' : 'plain'} />
+              <Stat label={t('rep.absentDays')} value={tot.absent} tone={tot.absent > 0 ? 'bad' : 'plain'} />
+              <Stat label={t('rep.timeWorked')} value={hm(tot.worked)} sub={`${decimalHours(tot.worked)} decimal hours`} />
             </section>
             <Card>
-              <CardHead title="By person" hint={`${fmtDateShort(d.from)} - ${fmtDateShort(d.to)}`} />
-              <Table head={['Employee', 'Present', 'Late', 'WFH', 'Absent', 'Leave', 'Worked', 'Expected']}>
+              <CardHead title={t('team.byPerson')} hint={`${fmtDateShort(d.from)} - ${fmtDateShort(d.to)}`} />
+              <Table head={[t('common.employee'), t('attendance.present'), t('attendance.late'), 'WFH', t('attendance.absent'), t('nav.leave'), t('attendance.worked'), 'Expected']}>
                 {d.rows.map((r) => (
                   <tr key={r.employee_number}>
                     <Person name={r.full_name} num={r.employee_number} />
@@ -332,6 +369,7 @@ interface LeaveRow {
 }
 
 function Leave({ year }: { year: number }) {
+  const t = useT();
   const s = useData<{
     year: number; rows: LeaveRow[];
     byType: { leave_code: string; is_paid: boolean; outstanding: string; taken: string }[];
@@ -345,8 +383,8 @@ function Leave({ year }: { year: number }) {
       empty={(
         <Card>
           <Empty
-            title="No leave balances for this year"
-            hint="Balances appear once the year's entitlement has been granted."
+            title={t('rep.noBalances')}
+            hint={t('rep.noBalancesHint')}
           />
         </Card>
       )}
@@ -386,13 +424,13 @@ function Leave({ year }: { year: number }) {
             );
           })}
           <Card>
-            <CardHead title="By person" hint={`Leave year ${d.year}`} />
-            <Table head={['Employee', 'Type', 'Paid', 'Accrued', 'Taken', 'Available']}>
+            <CardHead title={t('team.byPerson')} hint={`Leave year ${d.year}`} />
+            <Table head={[t('common.employee'), t('leave.type'), t('payslips.paid'), 'Accrued', 'Taken', 'Available']}>
               {d.rows.map((r) => (
                 <tr key={`${r.employee_number}-${r.leave_code}`}>
                   <Person name={r.full_name} num={r.employee_number} />
                   <N>{r.leave_code}</N>
-                  <td className="px-3 py-2 text-right">
+                  <td className="px-3 py-2 text-end">
                     <Badge status={r.is_paid ? 'approved' : 'week_off'}>
                       {r.is_paid ? 'paid' : 'unpaid'}
                     </Badge>
@@ -416,6 +454,7 @@ interface WfhRow {
 }
 
 function Wfh({ range }: { range: string }) {
+  const t = useT();
   const s = useData<{ from: string; to: string; note: string; rows: WfhRow[] }>(
     `/reports/wfh${range}`, [range]);
 
@@ -424,17 +463,17 @@ function Wfh({ range }: { range: string }) {
       state={s}
       rows={4}
       isEmpty={(d) => d.rows.length === 0}
-      empty={<Card><Empty title="No work-from-home recorded in this period" /></Card>}
+      empty={<Card><Empty title={t('rep.noWfh')} /></Card>}
     >
       {(d) => (
         <div className="space-y-4">
           <Card>
-            <CardHead title="Two sources, shown separately" />
+            <CardHead title={t('rep.twoSources')} />
             <p className="text-[13px] leading-relaxed text-ink-600">{d.note}</p>
           </Card>
           <Card>
-            <CardHead title="By person" hint={`${fmtDateShort(d.from)} - ${fmtDateShort(d.to)}`} />
-            <Table head={['Employee', 'From attendance', 'From approved leave', 'Disagreement']}>
+            <CardHead title={t('team.byPerson')} hint={`${fmtDateShort(d.from)} - ${fmtDateShort(d.to)}`} />
+            <Table head={[t('common.employee'), 'From attendance', 'From approved leave', 'Disagreement']}>
               {d.rows.map((r) => (
                 <tr key={r.employee_number}>
                   <Person name={r.full_name} num={r.employee_number} />
@@ -461,6 +500,7 @@ interface ReconRow {
 }
 
 function Reconciliation({ range }: { range: string }) {
+  const t = useT();
   const s = useData<{
     from: string; to: string; principle: string; rows: ReconRow[];
     summary: { flagged_days: number; attended_minutes: string; logged_minutes: string } | null;
@@ -478,45 +518,45 @@ function Reconciliation({ range }: { range: string }) {
             * kind - the two numbers sit side by side and both stand.
             */}
           <Card>
-            <CardHead title="What this report is for" />
+            <CardHead title={t('rep.whatFor')} />
             <p className="text-[13px] leading-relaxed text-ink-600">{d.principle}</p>
           </Card>
 
           <section className="grid grid-cols-2 gap-3 sm:grid-cols-3">
             <Stat
-              label="Days flagged"
+              label={t('rep.daysFlagged')}
               value={d.summary?.flagged_days ?? 0}
               tone={Number(d.summary?.flagged_days ?? 0) > 0 ? 'warn' : 'good'}
             />
-            <Stat label="Time attended" value={hm(d.summary?.attended_minutes ?? 0)} />
-            <Stat label="Effort logged" value={hm(d.summary?.logged_minutes ?? 0)} />
+            <Stat label={t('rep.timeAttended')} value={hm(d.summary?.attended_minutes ?? 0)} />
+            <Stat label={t('rep.effortLogged')} value={hm(d.summary?.logged_minutes ?? 0)} />
           </section>
 
           {d.rows.length === 0 ? (
             <Card>
               <Empty
-                title="Nothing to reconcile in this period"
-                hint="Attended time and logged effort agree, within tolerance."
+                title={t('rep.nothingToReconcile')}
+                hint={t('rep.reconcileOk')}
               />
             </Card>
           ) : (
             <Card>
               <CardHead
-                title="Days where the two disagree"
+                title={t('rep.daysDisagree')}
                 hint={`${fmtDateShort(d.from)} - ${fmtDateShort(d.to)}`}
               />
-              <Table head={['Employee', 'Date', 'Status', 'Attended', 'Logged', 'Variance', 'Finding']}>
+              <Table head={[t('common.employee'), t('common.date'), t('common.status'), 'Attended', 'Logged', 'Variance', 'Finding']}>
                 {d.rows.map((r, i) => (
                   <tr key={`${r.employee_number}-${r.business_date}-${i}`}>
                     <Person name={r.full_name} num={r.employee_number} />
                     <N>{fmtDateShort(r.business_date)}</N>
-                    <td className="px-3 py-2 text-right"><Badge status={r.attendance_status} /></td>
+                    <td className="px-3 py-2 text-end"><Badge status={r.attendance_status} /></td>
                     <N>{hm(r.attended_minutes)}</N>
                     <N>{hm(r.logged_minutes)}</N>
                     <N tone={Number(r.variance_minutes) < 0 ? 'text-rose-700' : 'text-amber-700'}>
                       {Number(r.variance_minutes) > 0 ? '+' : ''}{hm(r.variance_minutes)}
                     </N>
-                    <td className="px-3 py-2 text-right text-[12.5px] text-ink-500">{r.note}</td>
+                    <td className="px-3 py-2 text-end text-[12.5px] text-ink-500">{r.note}</td>
                   </tr>
                 ))}
               </Table>
@@ -534,6 +574,7 @@ interface TimesheetRow {
 }
 
 function Timesheets({ range }: { range: string }) {
+  const t = useT();
   const s = useData<{ from: string; to: string; rows: TimesheetRow[] }>(
     `/reports/timesheets${range}`, [range]);
 
@@ -542,7 +583,7 @@ function Timesheets({ range }: { range: string }) {
       state={s}
       rows={4}
       isEmpty={(d) => d.rows.length === 0}
-      empty={<Card><Empty title="No timesheet periods in this range" /></Card>}
+      empty={<Card><Empty title={t('rep.noPeriods')} /></Card>}
     >
       {(d) => {
         const waiting = d.rows.filter((r) => r.status === 'submitted' || r.status === 'under_review');
@@ -550,32 +591,32 @@ function Timesheets({ range }: { range: string }) {
         return (
           <div className="space-y-4">
             <section className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-              <Stat label="Periods" value={d.rows.length} />
+              <Stat label={t('rep.periods')} value={d.rows.length} />
               <Stat
-                label="Approved"
+                label={t('appr.approve')}
                 value={d.rows.filter((r) => r.status === 'approved').length}
                 tone="good"
               />
               <Stat
-                label="Awaiting a decision"
+                label={t('rep.awaitingDecision')}
                 value={waiting.length}
                 tone={waiting.length > 0 ? 'warn' : 'plain'}
               />
               <Stat
-                label="Waiting 3+ days"
+                label={t('rep.waiting3')}
                 value={stale.length}
                 tone={stale.length > 0 ? 'bad' : 'plain'}
-                sub="an approver is the bottleneck"
+                sub={t('rep.bottleneck')}
               />
             </section>
             <Card>
-              <CardHead title="By period" hint={`${fmtDateShort(d.from)} - ${fmtDateShort(d.to)}`} />
-              <Table head={['Employee', 'Period', 'Status', 'Logged', 'Waiting']}>
+              <CardHead title={t('rep.byPeriod')} hint={`${fmtDateShort(d.from)} - ${fmtDateShort(d.to)}`} />
+              <Table head={[t('common.employee'), t('period.label'), t('common.status'), 'Logged', 'Waiting']}>
                 {d.rows.map((r, i) => (
                   <tr key={`${r.employee_number}-${r.period_start}-${i}`}>
                     <Person name={r.full_name} num={r.employee_number} />
                     <N>{fmtDateShort(r.period_start)} - {fmtDateShort(r.period_end)}</N>
-                    <td className="px-3 py-2 text-right"><Badge status={r.status} /></td>
+                    <td className="px-3 py-2 text-end"><Badge status={r.status} /></td>
                     <N>{hm(r.logged_minutes)}</N>
                     <N tone={Number(r.days_waiting) >= 3 ? 'font-medium text-rose-700' : 'text-ink-400'}>
                       {r.days_waiting == null ? '-' : `${r.days_waiting} d`}
@@ -597,6 +638,7 @@ interface DocRow {
 }
 
 function Documents() {
+  const t = useT();
   const s = useData<{ withinDays: number; rows: DocRow[] }>('/reports/documents');
 
   return (
@@ -604,23 +646,23 @@ function Documents() {
       state={s}
       rows={4}
       isEmpty={(d) => d.rows.length === 0}
-      empty={<Card><Empty title="No document records" /></Card>}
+      empty={<Card><Empty title={t('rep.noDocRecords')} /></Card>}
     >
       {(d) => (
         <div className="space-y-4">
           <section className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-            <Stat label="People covered" value={d.rows.length} />
+            <Stat label={t('rep.peopleCovered')} value={d.rows.length} />
             <Stat
-              label="Nothing on file"
+              label={t('rep.nothingOnFile')}
               value={d.rows.filter((r) => Number(r.filed_types) === 0).length}
               tone={d.rows.some((r) => Number(r.filed_types) === 0) ? 'warn' : 'good'}
             />
             <Stat
-              label="Awaiting scan"
+              label={t('rep.awaitingScan')}
               value={d.rows.reduce((a, r) => a + Number(r.pending_scan), 0)}
             />
             <Stat
-              label="Expired"
+              label={t('rep.expired')}
               value={d.rows.reduce((a, r) => a + Number(r.expired), 0)}
               tone={d.rows.some((r) => Number(r.expired) > 0) ? 'bad' : 'plain'}
             />
@@ -634,10 +676,10 @@ function Documents() {
               * accident - the restriction lives in the query, not in this component.
               */}
             <CardHead
-              title="Filing posture"
+              title={t('rep.filingPosture')}
               hint={`Expiry window: the next ${d.withinDays} days. Counts only - document types are not shown.`}
             />
-            <Table head={['Employee', 'Types on file', 'Awaiting scan', 'Expiring soon', 'Expired']}>
+            <Table head={[t('common.employee'), 'Types on file', t('rep.awaitingScan'), 'Expiring soon', t('rep.expired')]}>
               {d.rows.map((r) => (
                 <tr key={r.employee_number}>
                   <Person name={r.full_name} num={r.employee_number} />
@@ -656,6 +698,7 @@ function Documents() {
 }
 
 function Effort({ range }: { range: string }) {
+  const t = useT();
   const s = useData<{
     from: string; to: string;
     byProject: { code: string; name: string; minutes: number; contributors: number }[];
@@ -670,8 +713,8 @@ function Effort({ range }: { range: string }) {
       empty={(
         <Card>
           <Empty
-            title="No effort logged in this period"
-            hint="Effort comes from work logs, which are recorded per day."
+            title={t('rep.noEffort')}
+            hint={t('rep.noEffortHint')}
           />
         </Card>
       )}
@@ -683,13 +726,13 @@ function Effort({ range }: { range: string }) {
         return (
           <div className="space-y-4">
             <section className="grid grid-cols-2 gap-3 sm:grid-cols-3">
-              <Stat label="Effort logged" value={hm(total)} sub={`${decimalHours(total)} decimal hours`} />
-              <Stat label="Projects" value={d.byProject.length} />
-              <Stat label="People reporting" value={d.byEmployee.length} />
+              <Stat label={t('rep.effortLogged')} value={hm(total)} sub={`${decimalHours(total)} decimal hours`} />
+              <Stat label={t('ep.projects')} value={d.byProject.length} />
+              <Stat label={t('team.peopleReporting')} value={d.byEmployee.length} />
             </section>
             <div className="grid gap-4 lg:grid-cols-2">
               <Card>
-                <CardHead title="By project" hint={`${fmtDateShort(d.from)} - ${fmtDateShort(d.to)}`} />
+                <CardHead title={t('team.byProject')} hint={`${fmtDateShort(d.from)} - ${fmtDateShort(d.to)}`} />
                 <ul className="space-y-3">
                   {d.byProject.map((p) => (
                     <li key={p.code}>
@@ -708,7 +751,7 @@ function Effort({ range }: { range: string }) {
                 </ul>
               </Card>
               <Card>
-                <CardHead title="By person" />
+                <CardHead title={t('team.byPerson')} />
                 <ul className="space-y-3">
                   {d.byEmployee.map((e) => (
                     <li key={e.employee_number}>
@@ -755,6 +798,7 @@ interface TaskProjectRow {
  * subject, so the reporting line cannot account for it and only the project view can see it.
  */
 function Tasks() {
+  const t = useT();
   const s = useData<{
     dueWithinDays: number; note: string;
     byAssignee: TaskAssigneeRow[]; byProject: TaskProjectRow[];
@@ -768,8 +812,8 @@ function Tasks() {
       empty={(
         <Card>
           <Empty
-            title="No tasks to report"
-            hint="You see tasks assigned within your reporting line, and the projects you are a member of."
+            title={t('rep.noTasks')}
+            hint={t('rep.noTasksHint')}
           />
         </Card>
       )}
@@ -783,15 +827,15 @@ function Tasks() {
         return (
           <div className="space-y-4">
             <section className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-              <Stat label="Open work" value={openWork} />
-              <Stat label="Overdue" value={overdue} tone={overdue > 0 ? 'bad' : 'good'} />
+              <Stat label={t('rep.openWork')} value={openWork} />
+              <Stat label={t('rep.overdue')} value={overdue} tone={overdue > 0 ? 'bad' : 'good'} />
               <Stat
                 label={`Due in ${d.dueWithinDays} days`}
                 value={dueSoon}
                 tone={dueSoon > 0 ? 'warn' : 'plain'}
               />
               <Stat
-                label="Assigned to nobody"
+                label={t('rep.assignedToNobody')}
                 value={unassigned}
                 tone={unassigned > 0 ? 'warn' : 'good'}
                 sub={unassigned > 0 ? 'no owner, so no reporting line' : undefined}
@@ -799,19 +843,19 @@ function Tasks() {
             </section>
 
             <Card>
-              <CardHead title="Why there are two tables" />
+              <CardHead title={t('rep.whyTwoTables')} />
               <p className="text-[13px] leading-relaxed text-ink-600">{d.note}</p>
             </Card>
 
             <Card>
               <CardHead
-                title="By assignee"
-                hint="Scoped through the reporting line - yourself, or the people who report to you."
+                title={t('rep.byAssignee')}
+                hint={t('rep.reportingScope')}
               />
               {d.byAssignee.length === 0 ? (
-                <Empty title="No tasks are assigned to anybody you can see" />
+                <Empty title={t('rep.noAssigned')} />
               ) : (
-                <Table head={['Employee', 'Open', 'In progress', 'Blocked', 'Done', 'Overdue', 'Due soon', 'No due date']}>
+                <Table head={[t('common.employee'), t('common.open'), 'In progress', 'Blocked', 'Done', t('rep.overdue'), 'Due soon', 'No due date']}>
                   {d.byAssignee.map((r) => (
                     <tr key={r.employee_number}>
                       <Person name={r.full_name} num={r.employee_number} />
@@ -830,13 +874,13 @@ function Tasks() {
 
             <Card>
               <CardHead
-                title="By project"
-                hint="Scoped through project membership - a different graph, so this table can cover more projects than the table above covers people."
+                title={t('team.byProject')}
+                hint={t('rep.projectScope')}
               />
               {d.byProject.length === 0 ? (
-                <Empty title="You are not a member of any project that has tasks" />
+                <Empty title={t('rep.noProjectTasks')} />
               ) : (
-                <Table head={['Project', 'Tasks', 'Unassigned', 'Open', 'In progress', 'Done', 'Overdue', 'People']}>
+                <Table head={[t('common.project'), 'Tasks', 'Unassigned', t('common.open'), 'In progress', 'Done', t('rep.overdue'), 'People']}>
                   {d.byProject.map((r) => (
                     <tr key={r.code}>
                       <td className="px-3 py-2">

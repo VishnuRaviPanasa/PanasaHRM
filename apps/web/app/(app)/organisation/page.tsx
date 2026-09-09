@@ -1,7 +1,8 @@
 'use client';
 
 import { useState } from 'react';
-import { ApiError, api, fmtDateShort, useData } from '@/lib/api';
+import { api, ApiError, fmtDateShort, useBusinessDate, useData } from '@/lib/api';
+import { useT } from '@/lib/i18n';
 import {
   Async, Badge, Button, Card, CardHead, Empty, ErrorBox, Field, Toast, inputCls,
 } from '@/components/ui';
@@ -42,7 +43,21 @@ interface Desig {
 const err = (e: unknown) => (e instanceof ApiError ? e.message : 'That change could not be saved.');
 
 export default function OrganisationPage() {
-  const today = new Date().toISOString().slice(0, 10);
+  const t = useT();
+  /*
+   * The business date, from the server.
+   *
+   * This was `new Date().toISOString().slice(0, 10)` - the UTC date, which before 05:30
+   * IST is YESTERDAY. It is used for `min` on the effective-from of a department move, so
+   * for five and a half hours a day the form permitted a BACK-DATED effective period.
+   * Rule 3 exists to stop exactly that, and the rails would have refused the write - but
+   * a form that offers an invalid date and then fails is a bug either way.
+   *
+   * Empty until it loads: `min=""` imposes no restriction for a moment, which is safe
+   * because the server is what actually decides, and is preferable to briefly offering
+   * a date that is wrong.
+   */
+  const today = useBusinessDate() ?? '';
   const [asOf, setAsOf] = useState('');
   const [toast, setToast] = useState<{ msg: string; tone: 'good' | 'bad' } | null>(null);
   const [tick, setTick] = useState(0);
@@ -61,14 +76,14 @@ export default function OrganisationPage() {
 
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div>
-          <h1 className="text-[21px] font-semibold text-ink-900">Organisation</h1>
+          <h1 className="text-[21px] font-semibold text-ink-900">{t('org.title')}</h1>
           <p className="mt-0.5 text-[13.5px] text-ink-500">
             Departments and designations. Renaming takes effect immediately; moving a department is
             recorded with a date, so past reports keep resolving to the structure of their time.
           </p>
         </div>
         <label className="flex items-center gap-2 text-[13px] text-ink-500">
-          Structure as of
+          {t('org.structureAsOf')}
           <input
             type="date"
             value={asOf || today}
@@ -90,6 +105,7 @@ function DepartmentMaster({ state, onDone, onFail, today }: {
   state: ReturnType<typeof useData<{ asOf: string | null; rows: Dept[] }>>;
   onDone: (m: string) => void; onFail: (e: unknown) => void; today: string;
 }) {
+  const t = useT();
   const [adding, setAdding] = useState(false);
   const [moving, setMoving] = useState<Dept | null>(null);
   const [renaming, setRenaming] = useState<Dept | null>(null);
@@ -140,26 +156,26 @@ function DepartmentMaster({ state, onDone, onFail, today }: {
   return (
     <Card>
       <CardHead
-        title="Departments"
+        title={t('org.departments')}
         hint={state.data?.asOf ? `Structure in force on ${fmtDateShort(state.data.asOf)}` : undefined}
         action={<Button size="sm" onClick={() => setAdding((a) => !a)}>
-          {adding ? 'Cancel' : 'Add department'}
+          {adding ? t('common.cancel') : 'Add department'}
         </Button>}
       />
 
       {adding && (
         <div className="mb-4 rounded-lg bg-ink-50 p-4 ring-1 ring-inset ring-ink-200">
           <div className="grid gap-3 sm:grid-cols-3">
-            <Field label="Code" hint="short, e.g. ENG" htmlFor="d-code">
+            <Field label={t('org.code')} hint={t('org.codeHint')} htmlFor="d-code">
               <input id="d-code" value={form.code} placeholder="ENG"
                 onChange={(e) => setForm({ ...form, code: e.target.value.toUpperCase() })}
                 className={`${inputCls} num`} />
             </Field>
-            <Field label="Name" htmlFor="d-name">
+            <Field label={t('org.name')} htmlFor="d-name">
               <input id="d-name" value={form.name} placeholder="Engineering"
                 onChange={(e) => setForm({ ...form, name: e.target.value })} className={inputCls} />
             </Field>
-            <Field label="Sits under" hint="leave blank for a root" htmlFor="d-parent">
+            <Field label={t('org.sitsUnder')} hint={t('org.blankForRoot')} htmlFor="d-parent">
               <select id="d-parent" value={form.parentId}
                 onChange={(e) => setForm({ ...form, parentId: e.target.value })}
                 className={inputCls}>
@@ -171,22 +187,22 @@ function DepartmentMaster({ state, onDone, onFail, today }: {
           <div className="mt-3">
             <Button size="sm" busy={busy} onClick={create}
               disabled={!form.code.trim() || !form.name.trim()}>
-              Create department
+              {t('org.createDepartment')}
             </Button>
           </div>
         </div>
       )}
 
       <Async state={state} rows={4} isEmpty={(d) => d.rows.length === 0}
-        empty={<Empty title="No departments yet" hint="Add the first one to start the structure." />}>
+        empty={<Empty title={t('org.noDepartments')} hint={t('org.noDepartmentsHint')} />}>
         {(d) => (
           <div className="overflow-x-auto">
-            <table className="w-full min-w-[42rem] text-left text-[13.5px]">
+            <table className="w-full min-w-[42rem] text-start text-[13.5px]">
               <thead>
                 <tr className="border-b border-ink-200">
-                  {['Department', 'Sits under', 'Headcount', 'Placed since', ''].map((h, i) => (
+                  {[t('emp.department'), t('org.sitsUnder'), t('rep.headcount'), 'Placed since', ''].map((h, i) => (
                     <th key={h || 'a'}
-                      className={`px-3 py-2 text-[12px] font-medium uppercase tracking-wide text-ink-400 ${i > 1 ? 'text-right' : ''}`}>
+                      className={`px-3 py-2 text-[12px] font-medium uppercase tracking-wide text-ink-400 ${i > 1 ? 'text-end' : ''}`}>
                       {h}
                     </th>
                   ))}
@@ -213,30 +229,30 @@ function DepartmentMaster({ state, onDone, onFail, today }: {
                       {/* A future placement is a SCHEDULED reorganisation, which is exactly what
                           the as-of control is for. Saying so beats making somebody find it. */}
                       {r.has_future_placement && (
-                        <Badge status="submitted" className="ml-2">move scheduled</Badge>
+                        <Badge status="submitted" className="ms-2">move scheduled</Badge>
                       )}
                     </td>
-                    <td className="num px-3 py-2.5 text-right text-ink-700">
+                    <td className="num px-3 py-2.5 text-end text-ink-700">
                       {r.direct_headcount}
                       {Number(r.subtree_headcount) !== Number(r.direct_headcount) && (
                         <span className="text-ink-400"> / {r.subtree_headcount}</span>
                       )}
                     </td>
-                    <td className="num px-3 py-2.5 text-right text-ink-500">
+                    <td className="num px-3 py-2.5 text-end text-ink-500">
                       {r.valid_from ? fmtDateShort(r.valid_from) : '—'}
                     </td>
-                    <td className="px-3 py-2.5 text-right">
+                    <td className="px-3 py-2.5 text-end">
                       <div className="flex justify-end gap-1.5">
                         <Button variant="ghost" size="sm"
                           onClick={() => { setRenaming(r); setRename(r.name); setMoving(null); }}>
-                          Rename
+                          {t('org.rename')}
                         </Button>
                         <Button variant="secondary" size="sm"
                           onClick={() => {
                             setMoving(r); setRenaming(null);
                             setMove({ parentId: r.parent_department_id ?? '', effectiveFrom: '', reason: '' });
                           }}>
-                          Move
+                          {t('org.move')}
                         </Button>
                       </div>
                     </td>
@@ -251,17 +267,17 @@ function DepartmentMaster({ state, onDone, onFail, today }: {
       {renaming && (
         <div className="mt-4 rounded-lg bg-ink-50 p-4 ring-1 ring-inset ring-ink-200">
           <p className="mb-2 text-[13px] text-ink-600">
-            Renaming <span className="font-medium text-ink-900">{renaming.code}</span>. A
+            {t('org.renaming')} <span className="font-medium text-ink-900">{renaming.code}</span>. A
             department that changes its name is the same department, so this takes effect
             everywhere at once and no history changes.
           </p>
           <div className="flex flex-wrap items-end gap-3">
-            <Field label="New name" htmlFor="d-rename">
+            <Field label={t('org.newName')} htmlFor="d-rename">
               <input id="d-rename" value={rename} onChange={(e) => setRename(e.target.value)}
                 className={`${inputCls} sm:w-72`} />
             </Field>
-            <Button size="sm" busy={busy} onClick={submitRename}>Save</Button>
-            <Button variant="ghost" size="sm" onClick={() => setRenaming(null)}>Cancel</Button>
+            <Button size="sm" busy={busy} onClick={submitRename}>{t('common.save')}</Button>
+            <Button variant="ghost" size="sm" onClick={() => setRenaming(null)}>{t('common.cancel')}</Button>
           </div>
         </div>
       )}
@@ -274,12 +290,12 @@ function DepartmentMaster({ state, onDone, onFail, today }: {
             * and the reason are both required and the copy says why.
             */}
           <p className="mb-3 text-[13px] text-ink-700">
-            Moving <span className="font-medium text-ink-900">{moving.code} · {moving.name}</span>.
+            {t('org.moving')} <span className="font-medium text-ink-900">{moving.code} · {moving.name}</span>.
             This is recorded as a change with a date — reports before that date keep resolving to
             the old structure.
           </p>
           <div className="grid gap-3 sm:grid-cols-3">
-            <Field label="New parent" hint="blank makes it a root" htmlFor="m-parent">
+            <Field label={t('org.newParent')} hint={t('org.blankMakesRoot')} htmlFor="m-parent">
               <select id="m-parent" value={move.parentId}
                 onChange={(e) => setMove({ ...move, parentId: e.target.value })}
                 className={inputCls}>
@@ -289,12 +305,12 @@ function DepartmentMaster({ state, onDone, onFail, today }: {
                   .map((r) => <option key={r.id} value={r.id}>{r.code} · {r.name}</option>)}
               </select>
             </Field>
-            <Field label="Effective from" hint="today or later" htmlFor="m-from">
+            <Field label={t('mst.effectiveFrom')} hint={t('org.todayOrLater')} htmlFor="m-from">
               <input id="m-from" type="date" min={today} value={move.effectiveFrom}
                 onChange={(e) => setMove({ ...move, effectiveFrom: e.target.value })}
                 className={`${inputCls} num`} />
             </Field>
-            <Field label="Reason" hint="required — it explains the move later" htmlFor="m-reason">
+            <Field label={t('leave.reason')} hint={t('org.reasonRequired')} htmlFor="m-reason">
               <input id="m-reason" value={move.reason} placeholder="Delivery reorganisation"
                 onChange={(e) => setMove({ ...move, reason: e.target.value })}
                 className={inputCls} />
@@ -303,9 +319,9 @@ function DepartmentMaster({ state, onDone, onFail, today }: {
           <div className="mt-3 flex gap-2">
             <Button size="sm" busy={busy} onClick={submitMove}
               disabled={move.reason.trim().length < 3}>
-              Record the move
+              {t('org.recordMove')}
             </Button>
-            <Button variant="ghost" size="sm" onClick={() => setMoving(null)}>Cancel</Button>
+            <Button variant="ghost" size="sm" onClick={() => setMoving(null)}>{t('common.cancel')}</Button>
           </div>
         </div>
       )}
@@ -319,6 +335,7 @@ function DesignationMaster({ state, onDone, onFail }: {
   state: ReturnType<typeof useData<{ rows: Desig[] }>>;
   onDone: (m: string) => void; onFail: (e: unknown) => void;
 }) {
+  const t = useT();
   const [adding, setAdding] = useState(false);
   const [busy, setBusy] = useState(false);
   const [form, setForm] = useState({ code: '', name: '', grade: '2' });
@@ -352,26 +369,26 @@ function DesignationMaster({ state, onDone, onFail }: {
   return (
     <Card>
       <CardHead
-        title="Designations"
-        hint="Retired titles stay on this list — historical assignments keep pointing at them."
+        title={t('org.designations')}
+        hint={t('org.retiredStay')}
         action={<Button size="sm" onClick={() => setAdding((a) => !a)}>
-          {adding ? 'Cancel' : 'Add designation'}
+          {adding ? t('common.cancel') : 'Add designation'}
         </Button>}
       />
 
       {adding && (
         <div className="mb-4 rounded-lg bg-ink-50 p-4 ring-1 ring-inset ring-ink-200">
           <div className="grid gap-3 sm:grid-cols-3">
-            <Field label="Code" htmlFor="g-code">
+            <Field label={t('masters.code')} htmlFor="g-code">
               <input id="g-code" value={form.code} placeholder="SE"
                 onChange={(e) => setForm({ ...form, code: e.target.value.toUpperCase() })}
                 className={`${inputCls} num`} />
             </Field>
-            <Field label="Name" htmlFor="g-name">
+            <Field label={t('masters.name')} htmlFor="g-name">
               <input id="g-name" value={form.name} placeholder="Senior Engineer"
                 onChange={(e) => setForm({ ...form, name: e.target.value })} className={inputCls} />
             </Field>
-            <Field label="Grade" hint="1 to 20" htmlFor="g-grade">
+            <Field label={t('org.grade')} hint="1 to 20" htmlFor="g-grade">
               <input id="g-grade" type="number" min={1} max={20} value={form.grade}
                 onChange={(e) => setForm({ ...form, grade: e.target.value })}
                 className={`${inputCls} num`} />
@@ -380,22 +397,22 @@ function DesignationMaster({ state, onDone, onFail }: {
           <div className="mt-3">
             <Button size="sm" busy={busy} onClick={create}
               disabled={!form.code.trim() || !form.name.trim()}>
-              Create designation
+              {t('org.createDesignation')}
             </Button>
           </div>
         </div>
       )}
 
       <Async state={state} rows={4} isEmpty={(d) => d.rows.length === 0}
-        empty={<Empty title="No designations yet" />}>
+        empty={<Empty title={t('org.noDesignations')} />}>
         {(d) => (
           <div className="overflow-x-auto">
-            <table className="w-full min-w-[36rem] text-left text-[13.5px]">
+            <table className="w-full min-w-[36rem] text-start text-[13.5px]">
               <thead>
                 <tr className="border-b border-ink-200">
-                  {['Designation', 'Grade', 'Held by', 'Status', ''].map((h, i) => (
+                  {[t('emp.designation'), t('org.grade'), 'Held by', t('common.status'), ''].map((h, i) => (
                     <th key={h || 'a'}
-                      className={`px-3 py-2 text-[12px] font-medium uppercase tracking-wide text-ink-400 ${i > 0 ? 'text-right' : ''}`}>
+                      className={`px-3 py-2 text-[12px] font-medium uppercase tracking-wide text-ink-400 ${i > 0 ? 'text-end' : ''}`}>
                       {h}
                     </th>
                   ))}
@@ -409,24 +426,24 @@ function DesignationMaster({ state, onDone, onFail }: {
                         <span className="num text-ink-400">{r.code}</span> {r.name}
                       </div>
                     </td>
-                    <td className="num px-3 py-2.5 text-right text-ink-600">{r.grade}</td>
-                    <td className="num px-3 py-2.5 text-right text-ink-700">{r.holders}</td>
-                    <td className="px-3 py-2.5 text-right">
+                    <td className="num px-3 py-2.5 text-end text-ink-600">{r.grade}</td>
+                    <td className="num px-3 py-2.5 text-end text-ink-700">{r.holders}</td>
+                    <td className="px-3 py-2.5 text-end">
                       {r.retired
                         ? <Badge status="week_off">retired {fmtDateShort(r.retired_on!)}</Badge>
                         : <Badge status="approved">available</Badge>}
                     </td>
-                    <td className="px-3 py-2.5 text-right">
+                    <td className="px-3 py-2.5 text-end">
                       {r.retired
                         ? (
                           <Button variant="secondary" size="sm" busy={busy}
                             onClick={() => retire(r, true)}>
-                            Make available
+                            {t('org.makeAvailable')}
                           </Button>
                         )
                         : (
                           <Button variant="ghost" size="sm" onClick={() => setConfirming(r)}>
-                            Retire
+                            {t('org.retire')}
                           </Button>
                         )}
                     </td>
@@ -446,15 +463,15 @@ function DesignationMaster({ state, onDone, onFail }: {
             * doing it should see which before they do it.
             */}
           <p className="text-[13px] text-ink-800">
-            Retire <span className="font-medium">{confirming.code} · {confirming.name}</span>?
+            {t('common.retire')} <span className="font-medium">{confirming.code} · {confirming.name}</span>?
             {confirming.holders > 0
               ? ` ${confirming.holders} ${confirming.holders === 1 ? 'person holds' : 'people hold'} it today. They keep it — it just cannot be given to anybody new.`
               : ' Nobody holds it today.'}
             {' '}It stays on this list, and it can be made available again.
           </p>
           <div className="mt-3 flex gap-2">
-            <Button size="sm" busy={busy} onClick={() => retire(confirming, false)}>Retire it</Button>
-            <Button variant="ghost" size="sm" onClick={() => setConfirming(null)}>Cancel</Button>
+            <Button size="sm" busy={busy} onClick={() => retire(confirming, false)}>{t('org.retireIt')}</Button>
+            <Button variant="ghost" size="sm" onClick={() => setConfirming(null)}>{t('common.cancel')}</Button>
           </div>
         </div>
       )}

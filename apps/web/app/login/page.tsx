@@ -5,6 +5,7 @@ import { useState } from 'react';
 import { api, ApiError, type Actor } from '@/lib/api';
 import { Button, Field, inputCls } from '@/components/ui';
 import { ArtMark } from '@/components/logo';
+import { LanguageSwitcher, useT } from '@/lib/i18n';
 
 const DEMO_USERS = [
   { email: 'vishnu.ravi@panasatech.com', label: 'Vishnu Ravi', role: 'Senior Engineer' },
@@ -33,6 +34,7 @@ const DEMO_USERS = [
 const SHOW_DEMO = process.env.NEXT_PUBLIC_SHOW_DEMO_ACCOUNTS === 'true';
 
 export default function LoginPage() {
+  const t = useT();
   const router = useRouter();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -58,11 +60,11 @@ export default function LoginPage() {
       <section className="hidden flex-col justify-between bg-ink-900 p-10 text-white lg:flex">
         <div className="flex items-center gap-2.5">
           <ArtMark size={32} />
-          <span className="text-[15px] font-semibold">ART HRM</span>
+          <span className="text-[15px] font-semibold">{t('app.name')}</span>
         </div>
         <div className="max-w-md">
           <h1 className="text-[30px] font-semibold leading-tight">
-            People, leave, attendance and project effort in one place.
+            {t('login.tagline')}
           </h1>
           <p className="mt-4 text-[14.5px] leading-relaxed text-ink-300">
             HR gets employee, leave and attendance visibility. Managers also get project and
@@ -82,28 +84,29 @@ export default function LoginPage() {
             ))}
           </dl>
         </div>
-        <p className="text-[12.5px] text-ink-500">Art Technology and Software · Kochi, Kerala</p>
+        <p className="text-[12.5px] text-ink-500">{t('login.place')}</p>
+        <div className="mt-4"><LanguageSwitcher /></div>
       </section>
 
       <section className="flex items-center justify-center px-5 py-12 sm:px-8">
         <div className="w-full max-w-sm">
           <div className="flex items-center gap-2.5 lg:hidden">
             <ArtMark size={32} />
-            <span className="text-[15px] font-semibold text-ink-900">ART HRM</span>
+            <span className="text-[15px] font-semibold text-ink-900">{t('app.name')}</span>
           </div>
 
-          <h2 className="mt-8 text-[22px] font-semibold text-ink-900 lg:mt-0">Sign in</h2>
-          <p className="mt-1 text-[13.5px] text-ink-500">Use your ART work email.</p>
+          <h2 className="mt-8 text-[22px] font-semibold text-ink-900 lg:mt-0">{t('login.title')}</h2>
+          <p className="mt-1 text-[13.5px] text-ink-500">{t('login.emailHint')}</p>
 
           <form onSubmit={submit} className="mt-6 space-y-4" noValidate>
-            <Field label="Work email" htmlFor="email">
+            <Field label={t('login.email')} htmlFor="email">
               <input
                 id="email" type="email" required autoComplete="username" className={inputCls}
                 value={email} onChange={(e) => setEmail(e.target.value)}
                 aria-invalid={!!error} aria-describedby={error ? 'login-error' : undefined}
               />
             </Field>
-            <Field label="Password" htmlFor="password">
+            <Field label={t('login.password')} htmlFor="password">
               <input
                 id="password" type="password" required autoComplete="current-password" className={inputCls}
                 value={password} onChange={(e) => setPassword(e.target.value)}
@@ -117,13 +120,13 @@ export default function LoginPage() {
               </p>
             )}
 
-            <Button type="submit" busy={busy} className="w-full">Sign in</Button>
+            <Button type="submit" busy={busy} className="w-full">{t('login.submit')}</Button>
           </form>
 
           {SHOW_DEMO && (
             <div className="mt-8 rounded-lg bg-ink-100 p-3.5">
               <p className="text-[12px] font-semibold uppercase tracking-wide text-ink-500">
-                Demo accounts
+                {t('login.demoAccounts')}
               </p>
               <ul className="mt-2 space-y-1">
                 {DEMO_USERS.map((u) => (
@@ -131,7 +134,7 @@ export default function LoginPage() {
                     <button
                       type="button"
                       onClick={() => { setEmail(u.email); setPassword(''); setError(null); }}
-                      className="flex w-full items-baseline justify-between gap-3 rounded px-1.5 py-1 text-left text-[13px] hover:bg-white"
+                      className="flex w-full items-baseline justify-between gap-3 rounded px-1.5 py-1 text-start text-[13px] hover:bg-white"
                     >
                       <span className="font-medium text-ink-800">{u.label}</span>
                       <span className="text-ink-500">{u.role}</span>

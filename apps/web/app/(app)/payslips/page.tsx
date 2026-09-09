@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import { PayslipDetail, PayslipList } from '@/components/payslips';
+import { useT } from '@/lib/i18n';
 
 /**
  * My Payslips.
@@ -12,14 +13,15 @@ import { PayslipDetail, PayslipList } from '@/components/payslips';
  * (Must-Know Rule 1), and this page renders whatever comes back.
  */
 export default function PayslipsPage() {
+  const t = useT();
   const [open, setOpen] = useState<string | null>(null);
 
   return (
     <div className="space-y-5">
       <div>
-        <h1 className="text-[21px] font-semibold text-ink-900">My payslips</h1>
+        <h1 className="text-[21px] font-semibold text-ink-900">{t('payslips.title')}</h1>
         <p className="mt-0.5 text-[13.5px] text-ink-500">
-          Your issued payslips, with the salary breakdown and the PDF for each period.
+          {t('payslips.subtitle')}
         </p>
       </div>
 
@@ -28,7 +30,7 @@ export default function PayslipsPage() {
         : (
           <PayslipList
             onOpen={setOpen}
-            emptyHint="Payslips appear here once HR has issued them for a pay period."
+            emptyHint={t('payslips.emptyHint')}
           />
         )}
     </div>

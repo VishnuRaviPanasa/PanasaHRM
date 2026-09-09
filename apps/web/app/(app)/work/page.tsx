@@ -2,64 +2,62 @@
 
 import { useState } from 'react';
 import { addDaysIso, api, ApiError, fmtDate, hm, useData, weekdayOf } from '@/lib/api';
-import { Async, Badge, Button, Card, CardHead, Empty, Field, Toast, inputCls } from '@/components/ui';
+import { Async, Badge, Button, Card, CardHead, Empty, Toast } from '@/components/ui';
+import { WorkEntryForm } from '@/components/work-entry';
+import { useT } from '@/lib/i18n';
 
-interface Projects {
-  projects: { id: string; code: string; name: string; client_name: string | null; role: string;
-             tasks: { id: string; code: string | null; title: string }[] | null }[];
-}
 interface WorkLog {
   date: string;
-  entries: { id: string; minutes: number; description: string | null;
-             project_code: string; project_name: string; task_code: string | null; task_title: string | null }[];
+  entries: {
+    id: string; minutes: number; description: string | null; entry_source: string;
+    project_code: string; project_name: string;
+    sub_project_code: string | null; sub_project_name: string | null;
+    task_code: string | null; task_title: string | null;
+    sub_task_code: string | null; sub_task_title: string | null;
+    entered_by_name: string | null;
+  }[];
   totalMinutes: number;
   period: { id: string; period_start: string; period_end: string; status: string } | null;
   locked: boolean;
 }
 
+/**
+ * My work - and only ever mine.
+ *
+ * THE EMPLOYEE PICKER USED TO LIVE HERE and does not any more. HR needed to record effort for an
+ * employee, so this screen grew a dropdown of other people and retitled itself from "My work" to
+ * "Work log" when one was chosen. That put a screen named for the signed-in person in charge of
+ * everybody else's day, and left the same page meaning two different things depending on a
+ * dropdown. HR now does it from the employee's own profile, where that person is already the
+ * subject of the page - see `WorkEntryForm` and `WorkLogCard` in the profile.
+ *
+ * Nothing was removed from the API: `POST /work-log` still accepts `employeeId` under
+ * `work.log.write_for`, and this screen simply never sends it.
+ */
 export default function WorkPage() {
-  const [date, setDate] = useState('2026-09-08');
-  const projects = useData<Projects>('/projects');
-  const log = useData<WorkLog>(`/work-log?date=${date}`, [date]);
+  const t = useT();
 
-  const [projectId, setProjectId] = useState('');
-  const [taskId, setTaskId] = useState('');
-  const [hours, setHours] = useState('4');
-  const [minutes, setMinutes] = useState('30');
-  const [description, setDescription] = useState('');
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  /*
+   * NO DATE LITERAL. The previous version opened on `useState('2026-09-08')`, so the form
+   * defaulted to a fixed day forever - by October it was offering to log effort five weeks in the
+   * past with no error to notice. The empty string means "ask the server", the response says
+   * which business day that was, and only then do the arrows have an anchor. A browser must never
+   * compute its own today: at 00:35 IST the UTC date is yesterday, which the effective-dated
+   * rails correctly refuse as back-dating (DEC-091).
+   */
+  const [date, setDate] = useState('');
+  const log = useData<WorkLog>(`/work-log${date ? `?date=${date}` : ''}`, [date]);
+  const day = date || log.data?.date || '';
+
   const [toast, setToast] = useState<{ msg: string; tone: 'good' | 'bad' } | null>(null);
-
-  const chosen = projects.data?.projects.find((p) => p.id === projectId);
-
-  async function add(e: React.FormEvent) {
-    e.preventDefault();
-    setBusy(true);
-    setError(null);
-    try {
-      const res = await api.post<{ entry: { minutes: number } }>('/work-log', {
-        date, projectId, taskId: taskId || null,
-        hours: Number(hours || 0), minutes: Number(minutes || 0),
-        description: description || null,
-      });
-      setToast({ msg: `Logged ${hm(res.entry.minutes)}`, tone: 'good' });
-      setDescription('');
-      await log.reload();
-    } catch (err) {
-      setError(err instanceof ApiError ? err.message : 'Could not save');
-    } finally {
-      setBusy(false);
-    }
-  }
 
   async function remove(id: string) {
     try {
       await api.del(`/work-log/${id}`);
-      setToast({ msg: 'Entry removed', tone: 'good' });
+      setToast({ msg: t('work.entryRemoved'), tone: 'good' });
       await log.reload();
     } catch (err) {
-      setToast({ msg: err instanceof ApiError ? err.message : 'Could not remove', tone: 'bad' });
+      setToast({ msg: err instanceof ApiError ? err.message : t('work.couldNotRemove'), tone: 'bad' });
     }
   }
 
@@ -67,26 +65,30 @@ export default function WorkPage() {
     <div className="space-y-5">
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div>
-          <h1 className="text-[21px] font-semibold text-ink-900">My work</h1>
+          <h1 className="text-[21px] font-semibold text-ink-900">{t('work.titleMine')}</h1>
           <p className="mt-0.5 text-[13.5px] text-ink-500">
-            What you worked on, and for which project. Effort is stored in whole minutes.
+            {t('work.subtitle')}
           </p>
         </div>
         <div className="flex items-center gap-1.5">
-          <Button variant="secondary" size="sm" onClick={() => setDate((d) => addDaysIso(d, -1))} aria-label="Previous day">←</Button>
-          <label htmlFor="work-date" className="sr-only">Date</label>
-          <input id="work-date" type="date" className="rounded-lg border-0 bg-white px-2.5 py-1 text-[13.5px] ring-1 ring-inset ring-ink-300" value={date} onChange={(e) => setDate(e.target.value)} />
-          <Button variant="secondary" size="sm" onClick={() => setDate((d) => addDaysIso(d, 1))} aria-label="Next day">→</Button>
+          <Button variant="secondary" size="sm" disabled={!day}
+                  onClick={() => setDate(addDaysIso(day, -1))} aria-label={t('period.previousDay')}>←</Button>
+          <label htmlFor="work-date" className="sr-only">{t('common.date')}</label>
+          <input
+            id="work-date" type="date" value={day}
+            onChange={(e) => setDate(e.target.value)}
+            className="rounded-lg border-0 bg-white px-2.5 py-1 text-[13.5px] ring-1 ring-inset ring-ink-300 focus:ring-2 focus:ring-inset focus:ring-ink-900"
+          />
+          <Button variant="secondary" size="sm" disabled={!day}
+                  onClick={() => setDate(addDaysIso(day, 1))} aria-label={t('period.nextDay')}>→</Button>
         </div>
       </div>
 
       <div className="grid gap-5 lg:grid-cols-5">
         <Card className="lg:col-span-3">
           <CardHead
-            title={`${weekdayOf(date)} ${fmtDate(date)}`}
-            hint={log.data?.locked
-              ? undefined
-              : 'Add a line per project. Duplicate a description if the work spans tasks.'}
+            title={day ? `${weekdayOf(day)} ${fmtDate(day)}` : t('app.loading')}
+            hint={log.data?.locked ? undefined : t('work.addEffortHint')}
             action={
               <span className="num text-[15px] font-semibold text-ink-900">
                 {hm(log.data?.totalMinutes ?? 0)}
@@ -96,8 +98,7 @@ export default function WorkPage() {
 
           {log.data?.locked && (
             <div role="status" className="mx-4 mt-4 rounded-lg bg-amber-50 p-3 text-[13px] text-amber-900 ring-1 ring-inset ring-amber-200 sm:mx-5">
-              This week's timesheet is <strong className="font-semibold">{log.data.period?.status}</strong> and is
-              locked. Entries cannot be added or removed — a correction needs an adjustment.
+              {t('work.locked', { status: log.data.period?.status ?? '' })}
             </div>
           )}
 
@@ -107,8 +108,8 @@ export default function WorkPage() {
             isEmpty={(d) => d.entries.length === 0}
             empty={
               <Empty
-                title="Nothing logged for this day"
-                hint="Add your first entry using the form on the right."
+                title={t('work.nothingLogged')}
+                hint={t('work.nothingLoggedHint')}
               />
             }
           >
@@ -120,15 +121,45 @@ export default function WorkPage() {
                       <div className="flex flex-wrap items-baseline gap-x-2">
                         <span className="text-[13.5px] font-medium text-ink-900">{en.project_name}</span>
                         <Badge>{en.project_code}</Badge>
-                        {en.task_title && <span className="text-[12.5px] text-ink-500">{en.task_code} {en.task_title}</span>}
+                        {/*
+                          * The whole path, not just the task. Effort attributed four levels deep
+                          * displayed as though it had stopped at the task before the read query
+                          * asked for the sub-task at all.
+                          */}
+                        {en.sub_project_name && (
+                          <span className="text-[12.5px] text-ink-500">{en.sub_project_name}</span>
+                        )}
+                        {en.task_title && (
+                          <span className="text-[12.5px] text-ink-500">
+                            {en.sub_project_name ? '› ' : ''}{en.task_code} {en.task_title}
+                          </span>
+                        )}
+                        {en.sub_task_title && (
+                          <span className="text-[12.5px] text-ink-500">
+                            › {en.sub_task_code} {en.sub_task_title}
+                          </span>
+                        )}
                       </div>
                       {en.description && <p className="mt-1 text-[13px] text-ink-600">{en.description}</p>}
+                      {/*
+                        * STILL SHOWN HERE, even though this screen can no longer create one.
+                        *
+                        * HR records an on-behalf entry from the employee's profile, and the
+                        * employee sees it on this page - so this is the one place it matters most
+                        * that a line they did not enter says so.
+                        */}
+                      {en.entry_source === 'hr_entry' && (
+                        <p className="mt-1 text-[12px] text-ink-500">
+                          {t('work.recordedBy', { name: en.entered_by_name ?? 'HR' })}
+                        </p>
+                      )}
                     </div>
                     <div className="flex shrink-0 items-center gap-2">
                       <span className="num text-[13.5px] font-medium text-ink-900">{hm(en.minutes)}</span>
                       {!d.locked && (
-                        <Button variant="ghost" size="sm" onClick={() => remove(en.id)} aria-label={`Remove ${en.project_code} entry`}>
-                          Remove
+                        <Button variant="ghost" size="sm" onClick={() => remove(en.id)}
+                                aria-label={`${t('common.remove')} ${en.project_code}`}>
+                          {t('common.remove')}
                         </Button>
                       )}
                     </div>
@@ -140,66 +171,17 @@ export default function WorkPage() {
         </Card>
 
         <Card className="lg:col-span-2">
-          <CardHead title="Add effort" />
-          <Async state={projects} rows={3} isEmpty={(p) => p.projects.length === 0}
-                 empty={<Empty title="You are not on any project" hint="A project manager assigns project membership." />}>
-            {(p) => (
-              <form onSubmit={add} className="space-y-4 p-4 sm:p-5" noValidate>
-                <Field label="Project" htmlFor="wk-project">
-                  <select
-                    id="wk-project" required className={inputCls} value={projectId}
-                    onChange={(e) => { setProjectId(e.target.value); setTaskId(''); }}
-                  >
-                    <option value="">Choose a project…</option>
-                    {p.projects.map((pr) => (
-                      <option key={pr.id} value={pr.id}>{pr.code} — {pr.name}</option>
-                    ))}
-                  </select>
-                </Field>
-
-                <Field label="Task" htmlFor="wk-task" hint="Optional.">
-                  <select id="wk-task" className={inputCls} value={taskId} disabled={!chosen}
-                          onChange={(e) => setTaskId(e.target.value)}>
-                    <option value="">No specific task</option>
-                    {(chosen?.tasks ?? []).map((t) => (
-                      <option key={t.id} value={t.id}>{t.code} — {t.title}</option>
-                    ))}
-                  </select>
-                </Field>
-
-                <fieldset>
-                  <legend className="text-[13px] font-medium text-ink-700">Effort</legend>
-                  <div className="mt-1 flex items-center gap-2">
-                    <label htmlFor="wk-h" className="sr-only">Hours</label>
-                    <input id="wk-h" type="number" min={0} max={23} className={`${inputCls} num w-20`} value={hours} onChange={(e) => setHours(e.target.value)} />
-                    <span className="text-[13px] text-ink-500">h</span>
-                    <label htmlFor="wk-m" className="sr-only">Minutes</label>
-                    <input id="wk-m" type="number" min={0} max={59} step={5} className={`${inputCls} num w-20`} value={minutes} onChange={(e) => setMinutes(e.target.value)} />
-                    <span className="text-[13px] text-ink-500">m</span>
-                  </div>
-                  <p className="mt-1 text-[12.5px] text-ink-500">
-                    Stored as {Number(hours || 0) * 60 + Number(minutes || 0)} minutes — never decimal hours.
-                  </p>
-                </fieldset>
-
-                <Field label="What did you do?" htmlFor="wk-desc">
-                  <input id="wk-desc" type="text" className={inputCls} value={description}
-                         onChange={(e) => setDescription(e.target.value)}
-                         placeholder="e.g. Implemented leave approval workflow" />
-                </Field>
-
-                {error && (
-                  <p role="alert" className="rounded-lg bg-rose-50 px-3 py-2 text-[13px] text-rose-800 ring-1 ring-inset ring-rose-200">
-                    {error}
-                  </p>
-                )}
-
-                <Button type="submit" busy={busy} disabled={!projectId || log.data?.locked} className="w-full">
-                  Add entry
-                </Button>
-              </form>
-            )}
-          </Async>
+          <CardHead title={t('work.addEffort')} />
+          {day && (
+            <WorkEntryForm
+              date={day}
+              locked={log.data?.locked}
+              onSaved={(mins) => {
+                setToast({ msg: t('work.logged', { amount: hm(mins) }), tone: 'good' });
+                void log.reload();
+              }}
+            />
+          )}
         </Card>
       </div>
 

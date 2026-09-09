@@ -1,8 +1,9 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { api, ApiError, fmtDate, fmtDateShort, useData, weekdayOf } from '@/lib/api';
+import { addDaysIso, api, ApiError, fmtDate, fmtDateShort, useBusinessDate, useData, weekdayOf } from '@/lib/api';
 import { Async, Badge, Bar, Button, Card, CardHead, Empty, Field, Skeleton, Toast, inputCls } from '@/components/ui';
+import { useT } from '@/lib/i18n';
 
 interface Balances {
   leaveYear: number;
@@ -24,11 +25,31 @@ interface Requests {
 }
 
 export default function LeavePage() {
+  const t = useT();
   const balances = useData<Balances>('/leave/balance');
   const history = useData<Requests>('/leave/requests');
 
-  const [from, setFrom] = useState('2026-09-14');
-  const [to, setTo] = useState('2026-09-16');
+  /*
+   * NO DATE LITERALS. These were '2026-09-14' and '2026-09-16', so the apply form opened
+   * on a fixed range that would have been in the past from October onward - and the live
+   * preview would have priced it against a leave year that had moved on.
+   *
+   * Seeded from the SERVER's business date instead, five and seven days ahead: leave is
+   * applied for in advance, so a default in the future is the useful one, and the live
+   * preview still has something to price the moment the screen opens. `addDaysIso` is
+   * UTC-anchored string arithmetic on a value the server produced, so no local timezone
+   * enters the calculation at any point.
+   */
+  const businessDate = useBusinessDate();
+  const [from, setFrom] = useState('');
+  const [to, setTo] = useState('');
+
+  useEffect(() => {
+    if (!businessDate) return;
+    // Seeds only - a range the person has typed is never overwritten.
+    setFrom((v) => v || addDaysIso(businessDate, 5));
+    setTo((v) => v || addDaysIso(businessDate, 7));
+  }, [businessDate]);
   const [type, setType] = useState('CL');
   const [reason, setReason] = useState('Family function');
 
@@ -62,7 +83,7 @@ export default function LeavePage() {
       setToast(`Leave applied for ${res.workingDays} working day${res.workingDays === 1 ? '' : 's'}`);
       await Promise.all([balances.reload(), history.reload()]);
     } catch (err) {
-      setFormError(err instanceof ApiError ? err.message : 'Could not submit');
+      setFormError(err instanceof ApiError ? err.message : t('ts.couldNotSubmit'));
     } finally {
       setBusy(false);
     }
@@ -71,16 +92,16 @@ export default function LeavePage() {
   return (
     <div className="space-y-5">
       <div>
-        <h1 className="text-[21px] font-semibold text-ink-900">Leave</h1>
+        <h1 className="text-[21px] font-semibold text-ink-900">{t('leave.title')}</h1>
         <p className="mt-0.5 text-[13.5px] text-ink-500">
-          Balances are folded from the leave ledger — every number traces to an entry.
+          {t('leave.subtitle')}
         </p>
       </div>
 
       {/* Balance */}
       <Async state={balances} rows={2}>
         {(b) => (
-          <section aria-label="Leave balances" className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+          <section aria-label={t('leave.balances')} className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
             {b.balances.map((x) => {
               const avail = Number(x.available ?? 0);
               const pending = Number(x.pending ?? 0);
@@ -105,26 +126,26 @@ export default function LeavePage() {
       <div className="grid gap-5 lg:grid-cols-5">
         {/* Apply */}
         <Card className="lg:col-span-3">
-          <CardHead title="Apply for leave" hint="The range is priced against weekends and the company holiday calendar." />
+          <CardHead title={t('leave.apply')} hint={t('leave.applyHint')} />
           <form onSubmit={submit} className="space-y-4 p-4 sm:p-5" noValidate>
             <div className="grid gap-4 sm:grid-cols-3">
-              <Field label="Leave type" htmlFor="lv-type">
+              <Field label={t('leave.type')} htmlFor="lv-type">
                 <select id="lv-type" className={inputCls} value={type} onChange={(e) => setType(e.target.value)}>
                   {(balances.data?.balances ?? [{ code: 'CL', name: 'Casual Leave' }]).map((b) => (
                     <option key={b.code} value={b.code}>{b.code} — {b.name}</option>
                   ))}
                 </select>
               </Field>
-              <Field label="From" htmlFor="lv-from">
+              <Field label={t('leave.from')} htmlFor="lv-from">
                 <input id="lv-from" type="date" required className={inputCls} value={from} onChange={(e) => setFrom(e.target.value)} />
               </Field>
-              <Field label="To" htmlFor="lv-to" error={to < from ? 'Must be on or after the start date' : undefined}>
+              <Field label={t('leave.to')} htmlFor="lv-to" error={to < from ? 'Must be on or after the start date' : undefined}>
                 <input id="lv-to" type="date" required className={inputCls} value={to} onChange={(e) => setTo(e.target.value)} />
               </Field>
             </div>
 
-            <Field label="Reason" htmlFor="lv-reason" hint="Optional, but your manager will see it.">
-              <input id="lv-reason" type="text" className={inputCls} value={reason} onChange={(e) => setReason(e.target.value)} placeholder="e.g. Family function" />
+            <Field label={t('leave.reason')} htmlFor="lv-reason" hint={t('leave.reasonHint')}>
+              <input id="lv-reason" type="text" className={inputCls} value={reason} onChange={(e) => setReason(e.target.value)} placeholder={t('leave.reasonPlaceholder')} />
             </Field>
 
             {/* The calculation, shown */}
@@ -154,14 +175,14 @@ export default function LeavePage() {
                         title={day.holiday_name ?? (day.is_weekend ? 'Weekend' : 'Working day')}
                       >
                         {weekdayOf(day.on_date)} {fmtDateShort(day.on_date)}
-                        {day.holiday_name && <span className="ml-1 no-underline">· {day.holiday_name}</span>}
+                        {day.holiday_name && <span className="ms-1 no-underline">· {day.holiday_name}</span>}
                       </li>
                     ))}
                   </ul>
 
                   {preview.optionalHolidaysInRange.length > 0 && (
                     <p className="text-[12.5px] text-amber-800">
-                      <strong className="font-semibold">Note:</strong>{' '}
+                      <strong className="font-semibold">{t('leave.note')}</strong>{' '}
                       {preview.optionalHolidaysInRange.map((h) => `${h.name} (${fmtDateShort(h.holiday_on)})`).join(', ')}
                       {' '}is an <em>optional</em> holiday. It still counts as leave unless you elect it,
                       so it is included above.
@@ -189,10 +210,10 @@ export default function LeavePage() {
 
             <div className="flex items-center gap-3">
               <Button type="submit" busy={busy} disabled={!preview?.sufficient || preview.workingDays === 0}>
-                Submit request
+                {t('leave.submit')}
               </Button>
               <span className="text-[12.5px] text-ink-500">
-                Submitting places a hold on the balance immediately.
+                {t('leave.submitHint')}
               </span>
             </div>
           </form>
@@ -200,12 +221,12 @@ export default function LeavePage() {
 
         {/* History */}
         <Card className="lg:col-span-2">
-          <CardHead title="My leave history" />
+          <CardHead title={t('leave.history')} />
           <Async
             state={history}
             rows={4}
             isEmpty={(d) => d.requests.length === 0}
-            empty={<Empty title="No leave requests yet" hint="Your applications and their outcomes will appear here." />}
+            empty={<Empty title={t('leave.noRequests')} hint={t('leave.noRequestsHint')} />}
           >
             {(d) => (
               <ul className="divide-y divide-ink-100">

@@ -4,6 +4,7 @@ import { useState } from 'react';
 import { addDaysIso, api, ApiError, fmtDate, fmtDateShort, hm, decimalHours, useData, weekdayOf } from '@/lib/api';
 import { Async, Badge, Bar, Button, Card, CardHead, Empty, Toast } from '@/components/ui';
 import { withBasePath } from '@/lib/base-path';
+import { useT } from '@/lib/i18n';
 
 interface Timesheet {
   periodStart: string; periodEnd: string;
@@ -18,19 +19,39 @@ interface Timesheet {
 }
 
 export default function TimesheetPage() {
-  const [start, setStart] = useState('2026-09-07');
-  const state = useData<Timesheet>(`/timesheet?start=${start}`, [start]);
+  const t = useT();
+  /*
+   * NO DATE LITERAL. This opened on `useState('2026-09-07')` - one fixed week, forever.
+   *
+   * `GET /timesheet` already defaults its own `periodStart` from `fn_business_date()` when
+   * the parameter is absent, so the literal was overriding a correct server default with a
+   * stale one. The state starts empty, the first request sends no `start`, and the
+   * response's own `periodStart` becomes the anchor the week arrows move from. An
+   * explicitly chosen week is preserved.
+   */
+  const [start, setStart] = useState('');
+  /*
+   * The parameter is OMITTED when nothing is chosen, not sent empty.
+   *
+   * `?start=` is not the same as absent: the handler resolves `start ?? weekStart(today)`, and
+   * `??` does not fall back on an empty string - so an empty value would have been used as the
+   * period start and matched no week at all.
+   */
+  const state = useData<Timesheet>(`/timesheet${start ? `?start=${start}` : ''}`, [start]);
+  // The week actually being shown: what was chosen, or what the server resolved. Every arrow,
+  // label and submit reads THIS, so none of them can act on an empty string.
+  const week = start || state.data?.periodStart || '';
   const [busy, setBusy] = useState(false);
   const [toast, setToast] = useState<{ msg: string; tone: 'good' | 'bad' } | null>(null);
 
   async function submit() {
     setBusy(true);
     try {
-      const res = await api.post<{ totalMinutes: number }>('/timesheet/submit', { start });
-      setToast({ msg: `Timesheet submitted — ${hm(res.totalMinutes)}`, tone: 'good' });
+      const res = await api.post<{ totalMinutes: number }>('/timesheet/submit', { start: week });
+      setToast({ msg: `{t('ts.submitted')} — ${hm(res.totalMinutes)}`, tone: 'good' });
       await state.reload();
     } catch (err) {
-      setToast({ msg: err instanceof ApiError ? err.message : 'Could not submit', tone: 'bad' });
+      setToast({ msg: err instanceof ApiError ? err.message : t('ts.couldNotSubmit'), tone: 'bad' });
     } finally {
       setBusy(false);
     }
@@ -43,17 +64,17 @@ export default function TimesheetPage() {
     <div className="space-y-5">
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div>
-          <h1 className="text-[21px] font-semibold text-ink-900">Timesheet</h1>
+          <h1 className="text-[21px] font-semibold text-ink-900">{t('ts.title')}</h1>
           <p className="mt-0.5 text-[13.5px] text-ink-500">
-            The week is the approvable, lockable unit — not the individual day.
+            {t('ts.subtitle')}
           </p>
         </div>
         <div className="flex items-center gap-1.5">
-          <Button variant="secondary" size="sm" onClick={() => setStart((s) => addDaysIso(s, -7))} aria-label="Previous week">←</Button>
+          <Button variant="secondary" size="sm" onClick={() => week && setStart(addDaysIso(week, -7))} disabled={!week} aria-label={t('ts.previousWeek')}>←</Button>
           <span className="num min-w-[11rem] text-center text-[13.5px] font-medium text-ink-800">
-            {fmtDateShort(start)} – {fmtDateShort(addDaysIso(start, 6))}
+            {week ? `${fmtDateShort(week)} – ${fmtDateShort(addDaysIso(week, 6))}` : '—'}
           </span>
-          <Button variant="secondary" size="sm" onClick={() => setStart((s) => addDaysIso(s, 7))} aria-label="Next week">→</Button>
+          <Button variant="secondary" size="sm" onClick={() => week && setStart(addDaysIso(week, 7))} disabled={!week} aria-label={t('ts.nextWeek')}>→</Button>
         </div>
       </div>
 
@@ -86,15 +107,15 @@ export default function TimesheetPage() {
 
                   {status === 'approved' ? (
                     <div className="rounded-lg bg-emerald-50 px-3.5 py-2 text-[13px] text-emerald-800 ring-1 ring-inset ring-emerald-200">
-                      Approved and locked. Corrections need an adjustment.
+                      {t('ts.approvedLocked')}
                     </div>
                   ) : status === 'submitted' ? (
                     <div className="rounded-lg bg-amber-50 px-3.5 py-2 text-[13px] text-amber-900 ring-1 ring-inset ring-amber-200">
-                      Awaiting your manager. The week is locked while it is under review.
+                      {t('ts.underReview')}
                     </div>
                   ) : (
                     <Button onClick={submit} busy={busy} disabled={empty}>
-                      Submit for approval
+                      {t('ts.submitForApproval')}
                     </Button>
                   )}
                 </div>
@@ -103,15 +124,15 @@ export default function TimesheetPage() {
               {empty ? (
                 <Card>
                   <Empty
-                    title="Nothing logged this week"
-                    hint="Record effort against your projects on the My Work screen, then submit the week."
-                    action={<Button variant="secondary" onClick={() => (window.location.href = withBasePath('/work'))}>Go to My Work</Button>}
+                    title={t('ts.nothingLogged')}
+                    hint={t('ts.nothingLoggedHint')}
+                    action={<Button variant="secondary" onClick={() => (window.location.href = withBasePath('/work'))}>{t('ts.goToMyWork')}</Button>}
                   />
                 </Card>
               ) : (
                 <div className="grid gap-5 lg:grid-cols-2">
                   <Card>
-                    <CardHead title="By day" hint="Weekends and days with no entry are omitted." />
+                    <CardHead title={t('ts.byDay')} hint={t('ts.byDayHint')} />
                     <ul className="space-y-3 p-4 sm:p-5">
                       {d.byDay.map((day) => (
                         <li key={day.work_date}>
@@ -128,7 +149,7 @@ export default function TimesheetPage() {
                   </Card>
 
                   <Card>
-                    <CardHead title="By project" hint="This is the number project costing consumes — never attendance." />
+                    <CardHead title={t('ts.byProject')} hint={t('ts.byProjectHint')} />
                     <ul className="space-y-3 p-4 sm:p-5">
                       {d.byProject.map((p) => (
                         <li key={p.code}>

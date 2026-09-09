@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react';
 import { ApiError, api, fmtDate } from '@/lib/api';
 import { Badge, Button, Empty, Skeleton } from '@/components/ui';
+import { useT } from '@/lib/i18n';
 
 /**
  * The shared document list and previewer, used by both `/documents` and the employee profile.
@@ -81,6 +82,7 @@ export const canPreview = (contentType: string | null): boolean =>
 // ---------------------------------------------------------------------------
 
 export function DocumentViewer({ doc, onClose }: { doc: Doc; onClose: () => void }) {
+  const t = useT();
   const [state, setState] = useState<
     { kind: 'loading' } | { kind: 'error'; message: string }
     | { kind: 'ready'; url: string; contentType: string }
@@ -144,10 +146,10 @@ export function DocumentViewer({ doc, onClose }: { doc: Doc; onClose: () => void
               .download(`/documents/${doc.id}/download`, doc.original_name ?? 'document')
               .catch(() => undefined)}
           >
-            Download
+            {t('docs.download')}
           </Button>
-          <Button size="sm" variant="ghost" onClick={onClose} aria-label="Close preview">
-            Close
+          <Button size="sm" variant="ghost" onClick={onClose} aria-label={t('docs.closePreview')}>
+            {t('common.close')}
           </Button>
         </div>
 
@@ -156,7 +158,7 @@ export function DocumentViewer({ doc, onClose }: { doc: Doc; onClose: () => void
 
           {state.kind === 'error' && (
             <div className="p-6">
-              <Empty title="Cannot preview this document" hint={state.message} />
+              <Empty title={t('docs.cannotPreview')} hint={state.message} />
             </div>
           )}
 
@@ -184,8 +186,8 @@ export function DocumentViewer({ doc, onClose }: { doc: Doc; onClose: () => void
           {state.kind === 'ready' && !canPreview(state.contentType) && (
             <div className="p-6">
               <Empty
-                title="No preview for this file type"
-                hint="Word and Excel files have no browser preview. Download it to open it."
+                title={t('docs.noPreviewType')}
+                hint={t('docs.noPreviewHint')}
                 action={
                   <Button
                     size="sm"
@@ -193,7 +195,7 @@ export function DocumentViewer({ doc, onClose }: { doc: Doc; onClose: () => void
                       .download(`/documents/${doc.id}/download`, doc.original_name ?? 'document')
                       .catch(() => undefined)}
                   >
-                    Download
+                    {t('docs.download')}
                   </Button>
                 }
               />
@@ -217,6 +219,7 @@ export function DocumentList({
   onChanged?: () => void | Promise<void>;
   onError?: (message: string) => void;
 }) {
+  const t = useT();
   const [viewing, setViewing] = useState<Doc | null>(null);
 
   const fail = (e: unknown) =>
@@ -245,7 +248,7 @@ export function DocumentList({
   }
 
   if (documents.length === 0) {
-    return <Empty title="No documents" hint="Nothing has been filed yet." />;
+    return <Empty title={t('docs.noDocuments')} hint={t('docs.nothingFiled')} />;
   }
 
   return (
@@ -307,7 +310,7 @@ export function DocumentList({
                 )}
                 {adverse && !doc.withdrawn_at && (
                   <p className="mt-1 text-[12.5px] text-rose-700">
-                    The latest upload did not pass its scan and is not being served.
+                    {t('docs.scanFailed')}
                   </p>
                 )}
                 {doc.withdrawn_at && (
@@ -327,20 +330,20 @@ export function DocumentList({
                     ? 'Word and Excel files have no browser preview'
                     : undefined}
                 >
-                  View
+                  {t('docs.view')}
                 </Button>
                 <Button size="sm" variant="secondary" disabled={!available}
                   onClick={() => void get(doc)}>
-                  Download
+                  {t('docs.download')}
                 </Button>
                 {isHr && awaitingScan && (
                   <Button size="sm" variant="secondary" onClick={() => void clear(doc)}>
-                    Mark cleared
+                    {t('docs.markCleared')}
                   </Button>
                 )}
                 {isHr && !doc.withdrawn_at && (
                   <Button size="sm" variant="ghost" onClick={() => void withdraw(doc)}>
-                    Withdraw
+                    {t('docs.withdraw')}
                   </Button>
                 )}
               </div>

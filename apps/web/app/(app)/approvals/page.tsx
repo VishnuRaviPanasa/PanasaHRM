@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import { api, ApiError, fmtDate, fmtDateShort, hm, useData } from '@/lib/api';
 import { Async, Badge, Button, Card, CardHead, Empty, Toast, inputCls } from '@/components/ui';
+import { useT } from '@/lib/i18n';
 
 interface LeaveQueue {
   requests: {
@@ -19,6 +20,7 @@ interface TsQueue {
 }
 
 export default function ApprovalsPage() {
+  const t = useT();
   const leave = useData<LeaveQueue>('/leave/approvals');
   const sheets = useData<TsQueue>('/timesheet/approvals');
   const [busyId, setBusyId] = useState<string | null>(null);
@@ -61,7 +63,7 @@ export default function ApprovalsPage() {
   return (
     <div className="space-y-5">
       <div>
-        <h1 className="text-[21px] font-semibold text-ink-900">Approvals</h1>
+        <h1 className="text-[21px] font-semibold text-ink-900">{t('appr.title')}</h1>
         <p className="mt-0.5 text-[13.5px] text-ink-500">
           Only your direct reports appear here. Approving leave posts a ledger entry — the balance
           is a consequence, not a field that gets edited.
@@ -70,14 +72,14 @@ export default function ApprovalsPage() {
 
       <Card>
         <CardHead
-          title="Leave requests"
+          title={t('common.leaveRequests')}
           action={leave.data?.requests.length ? <Badge status="pending">{leave.data.requests.length} pending</Badge> : undefined}
         />
         <Async
           state={leave}
           rows={3}
           isEmpty={(d) => d.requests.length === 0}
-          empty={<Empty title="No leave to approve" hint="Requests from your reports will appear here as they are submitted." />}
+          empty={<Empty title={t('appr.noLeave')} hint={t('appr.noLeaveHint')} />}
         >
           {(d) => (
             <ul className="divide-y divide-ink-100">
@@ -96,23 +98,23 @@ export default function ApprovalsPage() {
                       </div>
                       {r.reason && <p className="mt-1 text-[13px] text-ink-600">“{r.reason}”</p>}
                       <p className="mt-1 text-[12.5px] text-ink-500">
-                        Balance after the hold: <span className="num font-medium">{Number(r.balance_now ?? 0)}</span> days
+                        {t('appr.balanceAfterHold')} <span className="num font-medium">{Number(r.balance_now ?? 0)}</span> days
                       </p>
                     </div>
 
                     <div className="flex w-full flex-col gap-2 sm:w-auto sm:min-w-[16rem]">
                       <label htmlFor={`note-${r.id}`} className="sr-only">Note for {r.full_name}</label>
                       <input
-                        id={`note-${r.id}`} type="text" className={inputCls} placeholder="Optional note…"
+                        id={`note-${r.id}`} type="text" className={inputCls} placeholder={t('appr.optionalNote')}
                         value={notes[r.id] ?? ''}
                         onChange={(e) => setNotes((n) => ({ ...n, [r.id]: e.target.value }))}
                       />
                       <div className="flex gap-2">
                         <Button busy={busyId === r.id} onClick={() => decideLeave(r.id, 'approve')} className="flex-1">
-                          Approve
+                          {t('appr.approve')}
                         </Button>
                         <Button variant="danger" busy={busyId === r.id} onClick={() => decideLeave(r.id, 'reject')} className="flex-1">
-                          Reject
+                          {t('appr.reject')}
                         </Button>
                       </div>
                     </div>
@@ -126,14 +128,14 @@ export default function ApprovalsPage() {
 
       <Card>
         <CardHead
-          title="Timesheets"
+          title={t('common.timesheets')}
           action={sheets.data?.periods.length ? <Badge status="submitted">{sheets.data.periods.length} submitted</Badge> : undefined}
         />
         <Async
           state={sheets}
           rows={3}
           isEmpty={(d) => d.periods.length === 0}
-          empty={<Empty title="No timesheets to review" hint="Weekly timesheets appear here once your reports submit them." />}
+          empty={<Empty title={t('appr.noTimesheets')} hint={t('appr.noTimesheetsHint')} />}
         >
           {(d) => (
             <ul className="divide-y divide-ink-100">
@@ -151,9 +153,9 @@ export default function ApprovalsPage() {
                       </div>
                     </div>
                     <div className="flex gap-2">
-                      <Button busy={busyId === p.id} onClick={() => decideSheet(p.id, 'approve')}>Approve</Button>
+                      <Button busy={busyId === p.id} onClick={() => decideSheet(p.id, 'approve')}>{t('appr.approve')}</Button>
                       <Button variant="secondary" busy={busyId === p.id} onClick={() => decideSheet(p.id, 'return')}>
-                        Return
+                        {t('appr.return')}
                       </Button>
                     </div>
                   </div>

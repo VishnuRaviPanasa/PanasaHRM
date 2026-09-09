@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, type ReactNode } from 'react';
+import { useT } from '@/lib/i18n';
 
 /** The small set of primitives every screen is built from. Deliberately few. */
 
@@ -130,24 +131,26 @@ export const inputCls =
 
 /** Loading. A shaped skeleton, not a spinner - it tells you what is arriving. */
 export function Skeleton({ rows = 3, className = '' }: { rows?: number; className?: string }) {
+  const t = useT();
   return (
-    <div className={`space-y-2 p-4 sm:p-5 ${className}`} role="status" aria-label="Loading">
+    <div className={`space-y-2 p-4 sm:p-5 ${className}`} role="status" aria-label={t('ui.loading')}>
       {Array.from({ length: rows }).map((_, i) => (
         <div key={i} className="skeleton h-4" style={{ width: `${92 - i * 11}%` }} />
       ))}
-      <span className="sr-only">Loading…</span>
+      <span className="sr-only">{t('ui.loading')}</span>
     </div>
   );
 }
 
 /** Error. Says what failed and offers the way out. */
 export function ErrorBox({ message, onRetry }: { message: string; onRetry?: () => void }) {
+  const t = useT();
   return (
     <div role="alert" className="m-4 rounded-lg bg-rose-50 p-4 ring-1 ring-inset ring-rose-200 sm:m-5">
-      <p className="text-[13.5px] font-medium text-rose-900">Could not load this</p>
+      <p className="text-[13.5px] font-medium text-rose-900">{t('ui.couldNotLoad')}</p>
       <p className="mt-1 text-[13px] text-rose-800">{message}</p>
       {onRetry && (
-        <Button variant="secondary" size="sm" className="mt-3" onClick={onRetry}>Try again</Button>
+        <Button variant="secondary" size="sm" className="mt-3" onClick={onRetry}>{t('common.retry')}</Button>
       )}
     </div>
   );
@@ -155,6 +158,7 @@ export function ErrorBox({ message, onRetry }: { message: string; onRetry?: () =
 
 /** Empty. Never a blank box - say why it is empty and what to do. */
 export function Empty({ title, hint, action }: { title: string; hint?: string; action?: ReactNode }) {
+  const t = useT();
   return (
     <div className="px-4 py-10 text-center sm:px-5">
       <p className="text-[13.5px] font-medium text-ink-700">{title}</p>
@@ -172,10 +176,11 @@ export function Async<T>({ state, children, empty, isEmpty, rows }: {
   isEmpty?: (data: T) => boolean;
   rows?: number;
 }) {
+  const t = useT();
   if (state.loading) return <Skeleton rows={rows} />;
   if (state.error) return <ErrorBox message={state.error} onRetry={state.reload} />;
-  if (!state.data) return <>{empty ?? <Empty title="Nothing here yet" />}</>;
-  if (isEmpty?.(state.data)) return <>{empty ?? <Empty title="Nothing here yet" />}</>;
+  if (!state.data) return <>{empty ?? <Empty title={t('ui.nothingHere')} />}</>;
+  if (isEmpty?.(state.data)) return <>{empty ?? <Empty title={t('ui.nothingHere')} />}</>;
   return <>{children(state.data)}</>;
 }
 
@@ -188,6 +193,7 @@ export function Async<T>({ state, children, empty, isEmpty, rows }: {
 export function Toast({ message, tone = 'good', onDone }: {
   message: string; tone?: 'good' | 'bad'; onDone?: () => void;
 }) {
+  const t = useT();
   useEffect(() => {
     const t = setTimeout(() => onDone?.(), tone === 'bad' ? 6000 : 3500);
     return () => clearTimeout(t);
@@ -206,8 +212,8 @@ export function Toast({ message, tone = 'good', onDone }: {
       <button
         type="button"
         onClick={() => onDone?.()}
-        className="ml-1 rounded px-1 text-white/80 hover:text-white"
-        aria-label="Dismiss"
+        className="ms-1 rounded px-1 text-white/80 hover:text-white"
+        aria-label={t('ui.dismiss')}
       >
         &times;
       </button>

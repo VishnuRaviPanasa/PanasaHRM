@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react';
 import { api, ApiError, hm, useData } from '@/lib/api';
 import { Badge, Button, Card, CardHead, Toast, inputCls } from '@/components/ui';
+import { useT } from '@/lib/i18n';
 
 /**
  * The attendance punch card.
@@ -86,6 +87,7 @@ type GeoState =
   | { kind: 'unavailable'; reason: string };
 
 export function PunchCard({ onChanged }: { onChanged?: () => void }) {
+  const t = useT();
   const state = useData<Today>('/attendance/today');
   const [geo, setGeo] = useState<GeoState>({ kind: 'idle' });
   const [busy, setBusy] = useState(false);
@@ -103,7 +105,7 @@ export function PunchCard({ onChanged }: { onChanged?: () => void }) {
   function locate(): Promise<GeoState> {
     return new Promise((resolve) => {
       if (typeof navigator === 'undefined' || !navigator.geolocation) {
-        resolve({ kind: 'unavailable', reason: 'This browser has no location support' });
+        resolve({ kind: 'unavailable', reason: t('punch.noGeolocation') });
         return;
       }
       setGeo({ kind: 'locating' });
@@ -165,8 +167,8 @@ export function PunchCard({ onChanged }: { onChanged?: () => void }) {
   if (state.loading) {
     return (
       <Card>
-        <CardHead title="Today" />
-        <div className="space-y-2 p-4 sm:p-5" role="status" aria-label="Loading">
+        <CardHead title={t('dash.today')} />
+        <div className="space-y-2 p-4 sm:p-5" role="status" aria-label={t('ui.loading')}>
           <div className="skeleton h-9 w-44" />
           <div className="skeleton h-4 w-56" />
         </div>
@@ -176,14 +178,14 @@ export function PunchCard({ onChanged }: { onChanged?: () => void }) {
   if (state.error || !state.data) {
     return (
       <Card>
-        <CardHead title="Today" />
+        <CardHead title={t('period.today')} />
         <div
           role="alert"
           className="m-4 rounded-lg bg-rose-50 p-4 text-[13px] text-rose-800 ring-1 ring-inset ring-rose-200 sm:m-5"
         >
           {state.error ?? 'Could not load today'}
           <Button variant="secondary" size="sm" className="mt-3" onClick={state.reload}>
-            Try again
+            {t('common.retry')}
           </Button>
         </div>
       </Card>
@@ -228,7 +230,7 @@ export function PunchCard({ onChanged }: { onChanged?: () => void }) {
   return (
     <Card>
       <CardHead
-        title="Today"
+        title={t('period.today')}
         hint={dayName(d.businessDate)}
         action={d.day ? <Badge status={d.day.status} /> : <Badge status="draft">not started</Badge>}
       />
@@ -246,7 +248,7 @@ export function PunchCard({ onChanged }: { onChanged?: () => void }) {
                       className="h-2 w-2 animate-pulse rounded-full bg-emerald-600"
                     />
                     <span className="text-[12px] font-semibold uppercase tracking-[0.07em] text-emerald-800">
-                      On the clock
+                      {t('punch.onTheClock')}
                     </span>
                   </div>
                   <div className="num mt-1 text-[34px] font-semibold leading-none text-ink-900">
@@ -259,7 +261,7 @@ export function PunchCard({ onChanged }: { onChanged?: () => void }) {
               ) : done ? (
                 <>
                   <span className="text-[12px] font-semibold uppercase tracking-[0.07em] text-ink-500">
-                    Recorded today
+                    {t('punch.recordedToday')}
                   </span>
                   <div className="num mt-1 text-[34px] font-semibold leading-none text-ink-900">
                     {hm(d.day?.worked_minutes ?? 0)}
@@ -277,10 +279,10 @@ export function PunchCard({ onChanged }: { onChanged?: () => void }) {
                     * to the one thing on the card that carries no information.
                     */}
                   <div className="text-[19px] font-semibold leading-tight text-ink-900">
-                    Ready to start your day
+                    {t('punch.ready')}
                   </div>
                   <p className="mt-1 text-[13.5px] text-ink-600">
-                    You have not checked in yet.
+                    {t('punch.notCheckedIn')}
                   </p>
                 </>
               )}
@@ -303,13 +305,13 @@ export function PunchCard({ onChanged }: { onChanged?: () => void }) {
                 */}
               {noteOpen ? (
                 <>
-                  <label htmlFor="punch-note" className="sr-only">Note for this punch</label>
+                  <label htmlFor="punch-note" className="sr-only">{t('punch.noteForPunch')}</label>
                   <input
                     id="punch-note"
                     type="text"
                     autoFocus
                     className={`${inputCls} !mt-0 sm:w-[10.5rem]`}
-                    placeholder="Reason, if any"
+                    placeholder={t('punch.reasonIfAny')}
                     value={note}
                     onChange={(e) => setNote(e.target.value)}
                   />
@@ -320,7 +322,7 @@ export function PunchCard({ onChanged }: { onChanged?: () => void }) {
                   onClick={() => setNoteOpen(true)}
                   className="text-[12.5px] font-medium text-ink-500 underline decoration-ink-300 underline-offset-2 hover:text-ink-800"
                 >
-                  Add a note
+                  {t('punch.addNote')}
                 </button>
               )}
             </div>
@@ -343,7 +345,7 @@ export function PunchCard({ onChanged }: { onChanged?: () => void }) {
             role="status"
             className="mt-4 rounded-lg bg-amber-50 px-3.5 py-2.5 text-[13px] text-amber-900 ring-1 ring-inset ring-amber-200"
           >
-            <strong className="font-semibold">Location not shared.</strong> Your punch is still
+            <strong className="font-semibold">{t('punch.locationNotShared')}</strong> Your punch is still
             recorded — it is just marked unverified, so your manager can see it was not confirmed
             at an office. You can allow location in your browser&apos;s site settings.
           </p>
@@ -366,14 +368,14 @@ export function PunchCard({ onChanged }: { onChanged?: () => void }) {
           >
             {lastResult.location.verified ? (
               <>
-                <strong className="font-semibold">Location confirmed.</strong>{' '}
+                <strong className="font-semibold">{t('punch.locationConfirmed')}</strong>{' '}
                 <span className="num">{lastResult.location.distanceM} m</span> from{' '}
                 {lastResult.location.name} (geofence{' '}
                 <span className="num">{lastResult.location.radiusM} m</span>).
               </>
             ) : (
               <>
-                <strong className="font-semibold">Outside the geofence.</strong> You are{' '}
+                <strong className="font-semibold">{t('punch.outsideGeofence')}</strong> You are{' '}
                 <span className="num">{lastResult.location.distanceM} m</span> from the nearest
                 office, {lastResult.location.name} (geofence{' '}
                 <span className="num">{lastResult.location.radiusM} m</span>). The punch is
@@ -394,7 +396,7 @@ export function PunchCard({ onChanged }: { onChanged?: () => void }) {
       {d.punches.length > 0 && (
         <div className="border-t border-ink-100">
           <p className="px-4 pt-3 text-[12px] font-semibold uppercase tracking-wide text-ink-400 sm:px-5">
-            Today&apos;s punches
+            {t('punch.todaysPunches')}
           </p>
           <ul className="divide-y divide-ink-100">
             {d.punches.map((p) => (
@@ -456,9 +458,9 @@ export function PunchCard({ onChanged }: { onChanged?: () => void }) {
       <details className="group border-t border-ink-100 px-4 py-2.5 sm:px-5">
         <summary className="cursor-pointer list-none text-[12.5px] font-medium text-ink-500 hover:text-ink-800">
           <span className="underline decoration-ink-300 underline-offset-2">
-            What is stored, and where
+            {t('punch.whatIsStored')}
           </span>
-          <span aria-hidden className="ml-1.5 inline-block transition-transform group-open:rotate-90">
+          <span aria-hidden className="ms-1.5 inline-block transition-transform group-open:rotate-90">
             ›
           </span>
         </summary>
@@ -470,7 +472,7 @@ export function PunchCard({ onChanged }: { onChanged?: () => void }) {
           </p>
           {d.offices.length > 0 && (
             <p>
-              <span className="font-medium text-ink-700">Work locations:</span>{' '}
+              <span className="font-medium text-ink-700">{t('punch.workLocations')}</span>{' '}
               {d.offices.map((o) => `${o.name} (${o.radius_m} m)`).join(' · ')}
             </p>
           )}

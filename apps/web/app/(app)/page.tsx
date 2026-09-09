@@ -4,6 +4,7 @@ import Link from 'next/link';
 import { fmtDate, fmtDateShort, hm, useData, type Actor } from '@/lib/api';
 import { Async, Badge, Bar, Card, CardHead, Empty, Stat } from '@/components/ui';
 import { PunchCard } from '@/components/punch-card';
+import { useT } from '@/lib/i18n';
 
 interface Dashboard {
   actor: Actor;
@@ -26,6 +27,7 @@ interface Dashboard {
 }
 
 export default function DashboardPage() {
+  const t = useT();
   const state = useData<Dashboard>('/dashboard');
 
   return (
@@ -49,7 +51,7 @@ export default function DashboardPage() {
               </div>
               {d.me.attendanceToday && (
                 <div className="flex items-center gap-2 text-[13px] text-ink-600">
-                  <span>Today</span>
+                  <span>{t('dash.today')}</span>
                   <Badge status={d.me.attendanceToday.status} />
                   {d.me.attendanceToday.worked_minutes > 0 && (
                     <span className="num">{hm(d.me.attendanceToday.worked_minutes)}</span>
@@ -67,20 +69,20 @@ export default function DashboardPage() {
               is a presentation of what arrived rather than a hidden field.
             */}
             {isManager && d.org ? (
-              <section aria-label="Organization today" className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-                <Stat label="Employees" value={d.org.headcount} sub="active headcount" />
-                <Stat label="Present today" value={d.org.present_today} tone="good" sub="including late arrivals" />
-                <Stat label="Working from home" value={d.org.wfh_today} tone="brand" sub="paid, approved, present" />
-                <Stat label="On leave today" value={d.org.on_leave_today} tone="warn" sub="approved leave" />
+              <section aria-label={t('dash.orgToday')} className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+                <Stat label={t('nav.employees')} value={d.org.headcount} sub={t('dash.activeHeadcount')} />
+                <Stat label={t('dash.presentToday')} value={d.org.present_today} tone="good" sub={t('dash.includingLate')} />
+                <Stat label={t('dash.wfh')} value={d.org.wfh_today} tone="brand" sub={t('dash.paidApprovedPresent')} />
+                <Stat label={t('dash.onLeaveToday')} value={d.org.on_leave_today} tone="warn" sub={t('dash.approvedLeave')} />
               </section>
             ) : (
-              <section aria-label="My month so far" className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-                <Stat label="Days present" value={d.me.month.present} tone="good" sub="this month, including WFH" />
-                <Stat label="Late arrivals" value={d.me.month.late}
-                      tone={d.me.month.late > 0 ? 'warn' : 'plain'} sub="beyond the grace period" />
-                <Stat label="Logged this week" value={hm(d.me.weekMinutes)} tone="brand" sub="effort against projects" />
-                <Stat label="Leave available" value={Number(cl?.available ?? 0)}
-                      sub="casual leave days" />
+              <section aria-label={t('dash.myMonth')} className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+                <Stat label={t('dash.daysPresent')} value={d.me.month.present} tone="good" sub={t('dash.thisMonthWfh')} />
+                <Stat label={t('dash.lateArrivals')} value={d.me.month.late}
+                      tone={d.me.month.late > 0 ? 'warn' : 'plain'} sub={t('dash.beyondGrace')} />
+                <Stat label={t('dash.loggedThisWeek')} value={hm(d.me.weekMinutes)} tone="brand" sub={t('dash.effortAgainstProjects')} />
+                <Stat label={t('dash.leaveAvailable')} value={Number(cl?.available ?? 0)}
+                      sub={t('dash.casualLeaveDays')} />
               </section>
             )}
 
@@ -92,17 +94,17 @@ export default function DashboardPage() {
                 {isManager && (
                   <Card>
                     <CardHead
-                      title="Waiting on you"
+                      title={t('dash.waitingOnYou')}
                       hint={pendingTotal ? 'Approvals from your reports' : undefined}
                     />
                     {pendingTotal === 0 ? (
-                      <Empty title="Nothing to approve" hint="Leave requests and timesheets from your reports will appear here." />
+                      <Empty title={t('dash.nothingToApprove')} hint={t('dash.nothingToApproveHint')} />
                     ) : (
                       <ul className="divide-y divide-ink-100">
                         {d.pending.leave > 0 && (
                           <li>
                             <Link href="/approvals" className="flex items-center justify-between px-4 py-3 hover:bg-ink-50 sm:px-5">
-                              <span className="text-[13.5px] font-medium text-ink-800">Leave requests</span>
+                              <span className="text-[13.5px] font-medium text-ink-800">{t('common.leaveRequests')}</span>
                               <span className="flex items-center gap-2">
                                 <Badge status="pending">{d.pending.leave} pending</Badge>
                                 <span aria-hidden className="text-ink-400">→</span>
@@ -113,7 +115,7 @@ export default function DashboardPage() {
                         {d.pending.timesheets > 0 && (
                           <li>
                             <Link href="/approvals" className="flex items-center justify-between px-4 py-3 hover:bg-ink-50 sm:px-5">
-                              <span className="text-[13.5px] font-medium text-ink-800">Timesheets</span>
+                              <span className="text-[13.5px] font-medium text-ink-800">{t('common.timesheets')}</span>
                               <span className="flex items-center gap-2">
                                 <Badge status="submitted">{d.pending.timesheets} submitted</Badge>
                                 <span aria-hidden className="text-ink-400">→</span>
@@ -128,9 +130,9 @@ export default function DashboardPage() {
 
                 <Card>
                   <CardHead
-                    title="My leave balance"
-                    hint="Derived from the leave ledger, not a stored counter"
-                    action={<Link href="/leave" className="text-[13px] font-medium text-brand-700 hover:underline">Apply for leave</Link>}
+                    title={t('dash.myLeaveBalance')}
+                    hint={t('dash.ledgerDerived')}
+                    action={<Link href="/leave" className="text-[13px] font-medium text-brand-700 hover:underline">{t('dash.applyForLeave')}</Link>}
                   />
                   <div className="grid gap-4 p-4 sm:grid-cols-2 sm:p-5">
                     {[cl, sl].filter(Boolean).map((b) => (
@@ -149,7 +151,7 @@ export default function DashboardPage() {
                   </div>
                   {d.me.openRequests.length > 0 && (
                     <div className="border-t border-ink-100 px-4 py-3 sm:px-5">
-                      <p className="text-[12px] font-semibold uppercase tracking-wide text-ink-400">Awaiting approval</p>
+                      <p className="text-[12px] font-semibold uppercase tracking-wide text-ink-400">{t('dash.awaitingApproval')}</p>
                       <ul className="mt-2 space-y-1.5">
                         {d.me.openRequests.map((r) => (
                           <li key={r.id} className="flex items-center justify-between text-[13px]">
@@ -167,9 +169,9 @@ export default function DashboardPage() {
 
                 <Card>
                   <CardHead
-                    title="Today's work"
-                    hint="Effort against projects — separate from attendance"
-                    action={<Link href="/work" className="text-[13px] font-medium text-brand-700 hover:underline">Log work</Link>}
+                    title={t('dash.todaysWork')}
+                    hint={t('dash.todaysWorkHint')}
+                    action={<Link href="/work" className="text-[13px] font-medium text-brand-700 hover:underline">{t('dash.logWork')}</Link>}
                   />
                   <div className="flex items-center justify-between px-4 py-4 sm:px-5">
                     <div>
@@ -178,11 +180,11 @@ export default function DashboardPage() {
                         {d.me.todayMinutes === 0 ? 'Nothing logged yet today' : 'logged so far today'}
                       </div>
                     </div>
-                    <div className="text-right">
-                      <div className="text-[12px] font-semibold uppercase tracking-wide text-ink-400">My projects</div>
+                    <div className="text-end">
+                      <div className="text-[12px] font-semibold uppercase tracking-wide text-ink-400">{t('dash.myProjects')}</div>
                       <div className="mt-1 flex flex-wrap justify-end gap-1">
                         {d.me.projects.length === 0
-                          ? <span className="text-[13px] text-ink-500">None assigned</span>
+                          ? <span className="text-[13px] text-ink-500">{t('dash.noneAssigned')}</span>
                           : d.me.projects.map((p) => <Badge key={p.code}>{p.code}</Badge>)}
                       </div>
                     </div>
@@ -192,9 +194,9 @@ export default function DashboardPage() {
 
               <div className="space-y-5">
                 <Card>
-                  <CardHead title="Upcoming holidays" hint="2026 company calendar" />
+                  <CardHead title={t('dash.upcomingHolidays')} hint={t('dash.companyCalendar')} />
                   {d.upcomingHolidays.length === 0 ? (
-                    <Empty title="No holidays left this year" />
+                    <Empty title={t('dash.noHolidaysLeft')} />
                   ) : (
                     <ul className="divide-y divide-ink-100">
                       {d.upcomingHolidays.map((h) => (
@@ -211,9 +213,9 @@ export default function DashboardPage() {
                 </Card>
 
                 <Card>
-                  <CardHead title="Recent HR activity" />
+                  <CardHead title={t('dash.recentActivity')} />
                   {d.recentActivity.length === 0 ? (
-                    <Empty title="No activity yet" />
+                    <Empty title={t('dash.noActivity')} />
                   ) : (
                     <ul className="divide-y divide-ink-100">
                       {d.recentActivity.map((a, i) => (

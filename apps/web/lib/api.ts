@@ -244,4 +244,32 @@ export const addDaysIso = (iso: string, n: number): string => {
   return dt.toISOString().slice(0, 10);
 };
 
-export const todayIsoFallback = () => new Date().toISOString().slice(0, 10);
+/**
+ * THE BUSINESS DATE, from the server. The only correct source of "today" in this application.
+ *
+ * WHAT THIS REPLACES. `todayIsoFallback = () => new Date().toISOString().slice(0, 10)` used to
+ * live here. It was unused - but four screens had written the same expression inline, which is
+ * what an available helper like that invites. It returns the UTC date, and between midnight and
+ * 05:30 IST the UTC date is YESTERDAY, so for five and a half hours out of every twenty-four
+ * those screens were a day behind. Not cosmetically:
+ *
+ *   * `/organisation` used it for `min` on a department move's effective-from, so before 05:30
+ *     the form permitted a BACK-DATED effective period - which Rule 3 exists to forbid;
+ *   * `/payslips` defaulted a pay period's end to it, ending the period a day short against
+ *     0024's declared-net reconciliation invariant;
+ *   * `/reports` defaulted its window to it, silently omitting the current day;
+ *   * `/profile` computed length of service from it, reading a month short on the 1st.
+ *
+ * `fn_business_date()` resolves the date through the company timezone in `org_setting` and now
+ * rides the `/auth/me` response, which every screen in the shell already fetches. So there is one
+ * authoritative answer, it comes from the organisation's own mechanism rather than a clock, and
+ * there is no new endpoint or second abstraction to keep in step.
+ *
+ * Returns `null` until it has loaded. Callers must handle that rather than substituting a local
+ * date, which is the whole point - a screen that briefly shows nothing is correct, and one that
+ * briefly shows yesterday is not.
+ */
+export function useBusinessDate(): string | null {
+  const me = useData<{ businessDate: string }>('/auth/me');
+  return me.data?.businessDate ?? null;
+}

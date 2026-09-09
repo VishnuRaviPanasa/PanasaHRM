@@ -5,6 +5,7 @@ import { usePathname, useRouter } from 'next/navigation';
 import { useEffect, useState } from 'react';
 import { api, hasRole, useData, type Actor } from '@/lib/api';
 import { Button, Skeleton } from '@/components/ui';
+import { LanguageSwitcher, useT, type MessageKey } from '@/lib/i18n';
 import { ArtLogo } from '@/components/logo';
 
 /**
@@ -34,10 +35,18 @@ import { ArtLogo } from '@/components/logo';
  * disagree, the API is right.
  */
 
-interface NavItem { href: string; label: string }
+/*
+ * A nav entry names a MESSAGE KEY, not a label.
+ *
+ * The English string used to live here, which made this file the only place the sidebar could be
+ * read from - and made a second language impossible without a conditional beside every entry.
+ * The key resolves through the dictionary, so `nav-shell.test.mjs` now checks the routes AND that
+ * every key exists in both locales, which the literal version could not have checked at all.
+ */
+interface NavItem { href: string; labelKey: MessageKey }
 interface NavGroup {
   id: string;
-  title: string | null;
+  titleKey: MessageKey | null;
   items: readonly NavItem[];
   /** Which actors are OFFERED this group. The API decides who may pass. */
   when?: 'team' | 'hr' | 'hr_manage';
@@ -46,38 +55,38 @@ interface NavGroup {
 const NAV_GROUPS: readonly NavGroup[] = [
   {
     id: 'top',
-    title: null,
-    items: [{ href: '/', label: 'Dashboard' }],
+    titleKey: null,
+    items: [{ href: '/', labelKey: 'nav.dashboard' }],
   },
   {
     // Identity first, then presence, then effort - the order somebody actually moves through a
     // day, rather than alphabetical.
     id: 'me',
-    title: 'My records',
+    titleKey: 'nav.group.me',
     items: [
-      { href: '/profile', label: 'My profile' },
-      { href: '/documents', label: 'Documents' },
-      { href: '/attendance', label: 'Attendance' },
-      { href: '/leave', label: 'Leave' },
-      { href: '/work', label: 'My work' },
-      { href: '/timesheet', label: 'Timesheet' },
+      { href: '/profile', labelKey: 'nav.profile' },
+      { href: '/documents', labelKey: 'nav.documents' },
+      { href: '/attendance', labelKey: 'nav.attendance' },
+      { href: '/leave', labelKey: 'nav.leave' },
+      { href: '/work', labelKey: 'nav.work' },
+      { href: '/timesheet', labelKey: 'nav.timesheet' },
       // Under "My records" rather than a payroll section: for everyone except HR this screen IS
       // their own record, and HR reaches an employee's payslips from that employee's profile.
-      { href: '/payslips', label: 'My payslips' },
+      { href: '/payslips', labelKey: 'nav.payslips' },
     ],
   },
   {
     id: 'team',
-    title: 'My team',
+    titleKey: 'nav.group.team',
     when: 'team',
     items: [
-      { href: '/approvals', label: 'Approvals' },
-      { href: '/team', label: 'Team effort' },
+      { href: '/approvals', labelKey: 'nav.approvals' },
+      { href: '/team', labelKey: 'nav.team' },
     ],
   },
   {
     id: 'org',
-    title: 'Organisation',
+    titleKey: 'nav.group.org',
     items: [
       /*
        * "Employees", not "People". The glossary keeps them apart on purpose - a Person is a human
@@ -85,14 +94,14 @@ const NAV_GROUPS: readonly NavGroup[] = [
        * hold two over time. This screen lists employments, so the softer word would have been a
        * domain error rather than a friendlier label.
        */
-      { href: '/employees', label: 'Employees' },
+      { href: '/employees', labelKey: 'nav.employees' },
       /*
        * Reports sits with the organisation rather than under "My records", and is offered to
        * everyone. Both are deliberate: the page asks the API which reports the caller may run
        * (DEC-067), and an employee's view of each is their own record - so the narrowing lives in
        * the policy, not in this list.
        */
-      { href: '/reports', label: 'Reports' },
+      { href: '/reports', labelKey: 'nav.reports' },
     ],
   },
   {
@@ -107,7 +116,7 @@ const NAV_GROUPS: readonly NavGroup[] = [
      * list.
      */
     id: 'masters',
-    title: 'Masters',
+    titleKey: 'nav.group.masters',
     /*
      * `hr_manage`, not `hr`. The existing `hr` condition includes `auditor`, which may READ
      * configuration (that is why Settings uses it) but holds neither `org.unit.manage` nor
@@ -115,19 +124,32 @@ const NAV_GROUPS: readonly NavGroup[] = [
      * already locked - the exact thing DEC-053 recorded about the settings link.
      */
     when: 'hr_manage',
-    items: [{ href: '/organisation', label: 'Organisation' }],
+    items: [
+      { href: '/organisation', labelKey: 'nav.organisation' },
+      /*
+       * The work hierarchy - projects, sub-projects, tasks, sub-tasks.
+       *
+       * In the SAME group as Organisation rather than a new one: both are HR master data,
+       * both are governed by an `org`/`work` .manage action, and a second masters section
+       * would be exactly the parallel architecture that was not wanted. `hr_manage` gates
+       * the group, and work-masters.ts refuses anybody without work.project.manage or
+       * work.task.manage regardless of what this list offers.
+       */
+      { href: '/masters/work-management', labelKey: 'nav.workStructure' },
+    ],
   },
   {
     id: 'admin',
-    title: 'Administration',
+    titleKey: 'nav.group.admin',
     when: 'hr',
-    items: [{ href: '/settings', label: 'Settings' }],
+    items: [{ href: '/settings', labelKey: 'nav.settings' }],
   },
 ];
 
 export default function AppLayout({ children }: { children: React.ReactNode }) {
   const router = useRouter();
   const pathname = usePathname();
+  const t = useT();
   const me = useData<{ actor: Actor }>('/auth/me');
   const [open, setOpen] = useState(false);
 
@@ -191,22 +213,22 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   ].join(' ');
 
   const navGroups = (idPrefix: string) => groups.map((g) => (
-    <div key={g.id} className={g.title ? 'mt-4 first:mt-0' : 'first:mt-0'}>
-      {g.title && (
+    <div key={g.id} className={g.titleKey ? 'mt-4 first:mt-0' : 'first:mt-0'}>
+      {g.titleKey && (
         <h2
           id={`${idPrefix}-${g.id}`}
           className="mb-1 px-3 text-[11px] font-semibold uppercase tracking-[0.07em] text-ink-400"
         >
-          {g.title}
+          {t(g.titleKey)}
         </h2>
       )}
-      <ul {...(g.title ? { 'aria-labelledby': `${idPrefix}-${g.id}` } : {})} className="space-y-0.5">
+      <ul {...(g.titleKey ? { 'aria-labelledby': `${idPrefix}-${g.id}` } : {})} className="space-y-0.5">
         {g.items.map((i) => {
           const on = active(i.href);
           return (
             <li key={i.href}>
               <Link href={i.href} aria-current={on ? 'page' : undefined} className={rowClass(on)}>
-                {i.label}
+                {t(i.labelKey)}
               </Link>
             </li>
           );
@@ -235,20 +257,20 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
     <div className="flex h-dvh flex-col">
       <header className="z-30 shrink-0 border-b border-ink-200 bg-white/95 backdrop-blur">
         <div className="flex items-center gap-3 px-4 py-2.5 sm:px-6">
-          <Link href="/" className="flex shrink-0 items-center gap-2" aria-label="ART HRM home">
+          <Link href="/" className="flex shrink-0 items-center gap-2" aria-label={t('app.name')}>
             {/* The wordmark hides below sm; the disc alone still identifies the product. */}
             <ArtLogo size={28} className="sm:hidden" compact />
             <ArtLogo size={28} className="hidden sm:inline-flex" />
           </Link>
 
-          <div className="ml-auto flex items-center gap-2">
+          <div className="ms-auto flex items-center gap-2">
             {/* The name badge is where people look for their own record, so it goes there. */}
             <Link
               href="/profile"
               className="flex items-center gap-2 rounded-lg px-1 py-0.5 hover:bg-ink-100"
-              aria-label="My profile"
+              aria-label={t('nav.profile')}
             >
-              <span className="hidden text-right sm:block">
+              <span className="hidden text-end sm:block">
                 <span className="block text-[13px] font-medium leading-tight text-ink-900">{actor.name}</span>
                 <span className="block text-[12px] leading-tight text-ink-500">
                   {(actor.roles ?? [actor.role]).join(' · ').replace(/_/g, ' ')} · {actor.employeeNumber}
@@ -258,7 +280,9 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
                 {actor.name.split(' ').map((p) => p[0]).slice(0, 2).join('')}
               </span>
             </Link>
-            <Button variant="ghost" size="sm" onClick={signOut}>Sign out</Button>
+            {/* Beside the account controls, which is where somebody looks for it. */}
+            <LanguageSwitcher />
+            <Button variant="ghost" size="sm" onClick={signOut}>{t('app.signOut')}</Button>
             <button
               type="button"
               onClick={() => setOpen((o) => !o)}
@@ -266,7 +290,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
               aria-controls="mobile-nav"
               className="rounded-lg p-1.5 text-ink-600 hover:bg-ink-100 lg:hidden"
             >
-              <span className="sr-only">Menu</span>
+              <span className="sr-only">{t('app.menu')}</span>
               <svg width="20" height="20" viewBox="0 0 20 20" fill="none" aria-hidden>
                 <path d="M3 6h14M3 10h14M3 14h14" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
               </svg>
@@ -280,7 +304,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
           * unlabelled links is no easier to scan on a phone than on a desktop.
           */}
         {open && (
-          <nav id="mobile-nav" aria-label="Main" className="max-h-[70vh] overflow-y-auto border-t border-ink-100 px-3 py-3 lg:hidden">
+          <nav id="mobile-nav" aria-label={t('app.mainContent')} className="max-h-[70vh] overflow-y-auto border-t border-ink-100 px-3 py-3 lg:hidden">
             {navGroups('mnav')}
           </nav>
         )}
@@ -290,7 +314,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
       <div className="flex min-h-0 flex-1">
         {/* Its own scroll region, so a long report never pushes the navigation out of reach. */}
         <nav
-          aria-label="Main"
+          aria-label={t('app.mainContent')}
           className="hidden w-56 shrink-0 overflow-y-auto border-r border-ink-200 px-2 py-4 lg:block"
         >
           {navGroups('snav')}

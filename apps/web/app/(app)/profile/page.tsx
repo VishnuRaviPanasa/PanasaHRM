@@ -1,9 +1,10 @@
 'use client';
 
 import Link from 'next/link';
-import { hasRole, useData, type Actor } from '@/lib/api';
+import { type Actor, hasRole, useBusinessDate, useData } from '@/lib/api';
 import { Async, Badge, Card, CardHead, Empty, Skeleton, Stat } from '@/components/ui';
 import { DocumentList, type Doc } from '@/components/documents';
+import { useT, type MessageKey } from '@/lib/i18n';
 
 /**
  * Employee Self-Service: my own profile.
@@ -39,6 +40,7 @@ interface ProfileResponse {
 
 /** A date-only string is already correct from the API (Rule 5 - never reparse it into a Date). */
 function fmtDate(v: unknown): string | null {
+  const t = useT();
   if (typeof v !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(v)) return null;
   const [y, m, d] = v.split('-');
   const months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
@@ -53,13 +55,21 @@ function show(v: unknown): string {
   return String(v);
 }
 
-/** Years and months of service, from a date-only string. No Date arithmetic on the value. */
-function serviceLength(joined: unknown): string | null {
+/**
+ * Years and months of service, from two date-only strings. No Date arithmetic on either.
+ *
+ * `asOf` is the SERVER's business date. This used `new Date()` and read its month from the
+ * browser, which on the 1st of a month before 05:30 IST is still the PREVIOUS month - so
+ * length of service showed a month short. The smallest of the four instances of this bug,
+ * and fixed the same way rather than left as the one exception somebody has to remember.
+ */
+function serviceLength(joined: unknown, asOf: string | null): string | null {
+  const t = useT();
   const d = fmtDate(joined);
-  if (!d || typeof joined !== 'string') return null;
+  if (!d || typeof joined !== 'string' || !asOf) return null;
   const [jy, jm] = joined.split('-').map(Number);
-  const now = new Date();
-  let months = (now.getFullYear() - jy!) * 12 + (now.getMonth() + 1 - jm!);
+  const [ny, nm] = asOf.split('-').map(Number);
+  let months = (ny! - jy!) * 12 + (nm! - jm!);
   if (months < 0) return null;
   const y = Math.floor(months / 12);
   const m = months % 12;
@@ -68,6 +78,7 @@ function serviceLength(joined: unknown): string | null {
 }
 
 function DetailList({ rows }: { rows: Row[] }) {
+  const t = useT();
   const shown = rows.filter((r) => r.value !== undefined);
   return (
     <dl className="divide-y divide-ink-100">
@@ -78,7 +89,7 @@ function DetailList({ rows }: { rows: Row[] }) {
             <span className={`text-[13.5px] ${r.value ? 'text-ink-900' : 'text-ink-400'}`}>
               {show(r.value)}
             </span>
-            {r.hint && <span className="ml-2 text-[12px] text-ink-400">{r.hint}</span>}
+            {r.hint && <span className="ms-2 text-[12px] text-ink-400">{r.hint}</span>}
           </dd>
         </div>
       ))}
@@ -86,20 +97,29 @@ function DetailList({ rows }: { rows: Row[] }) {
   );
 }
 
-const EVENT_LABEL: Record<string, string> = {
-  joined: 'Joined',
-  confirmed: 'Confirmed',
-  probation_extended: 'Probation extended',
-  transferred: 'Transferred',
-  promoted: 'Promoted',
-  resigned: 'Resignation submitted',
-  termination_initiated: 'Notice served',
-  resignation_withdrawn: 'Resignation withdrawn',
-  exited: 'Left the company',
+/*
+ * Event code -> MESSAGE KEY, not text.
+ *
+ * A module-level constant has no component to bind a hook to, so t() cannot be called
+ * here - the substitution pass put calls in this object and the build caught it. The keys
+ * are resolved where a row renders. The event codes themselves are API values and are
+ * never translated.
+ */
+const EVENT_LABEL: Record<string, MessageKey> = {
+  joined: 'emp.joined',
+  confirmed: 'rep.confirmed',
+  probation_extended: 'ev.probationExtended',
+  transferred: 'ev.transferred',
+  promoted: 'rep.promoted',
+  resigned: 'ev.resignationSubmitted',
+  termination_initiated: 'ev.noticeServed',
+  resignation_withdrawn: 'ev.resignationWithdrawn',
+  exited: 'ev.leftCompany',
 };
 
 /** The caller's own documents. RESTRICTED types are absent from the response (OR-25). */
 function MyDocuments({ employeeId, isHr }: { employeeId: string; isHr: boolean }) {
+  const t = useT();
   const state = useData<{ documents: Doc[] }>(`/documents?employeeId=${employeeId}`, [employeeId]);
   const docs = state.data?.documents ?? [];
   if (state.loading || state.error) return null;
@@ -107,19 +127,19 @@ function MyDocuments({ employeeId, isHr }: { employeeId: string; isHr: boolean }
   return (
     <Card>
       <CardHead
-        title="My documents"
-        hint="Uploaded by you or filed by HR. Scanned before they become available."
+        title={t('me.myDocuments')}
+        hint={t('me.myDocumentsHint')}
         action={
           <Link href="/documents" className="text-[13px] font-medium text-brand-700 hover:underline">
-            Upload
+            {t('docs.uploadAction')}
           </Link>
         }
       />
       {docs.length === 0
         ? (
           <Empty
-            title="No documents yet"
-            hint="Upload your ID proof, PAN card or certificates from the Documents screen."
+            title={t('docs.noneYet')}
+            hint={t('me.noDocsHint')}
           />
         )
         : <DocumentList documents={docs} isHr={isHr} onChanged={() => state.reload()} />}
@@ -128,6 +148,9 @@ function MyDocuments({ employeeId, isHr }: { employeeId: string; isHr: boolean }
 }
 
 export default function MyProfilePage() {
+  const t = useT();
+  // The server's business date, for length of service - see the note on serviceLength.
+  const businessDate = useBusinessDate();
   const me = useData<{ actor: Actor }>('/auth/me');
   const id = me.data?.actor.employeeId ?? null;
   const isHr = hasRole(me.data?.actor, 'hr_admin', 'hr_ops');
@@ -139,16 +162,16 @@ export default function MyProfilePage() {
     <div className="space-y-5">
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div>
-          <h1 className="text-[19px] font-semibold tracking-tight text-ink-900">My Profile</h1>
+          <h1 className="text-[19px] font-semibold tracking-tight text-ink-900">{t('me.title')}</h1>
           <p className="mt-0.5 text-[13.5px] text-ink-500">
-            Your own record. Personal details on this page are visible to you alone.
+            {t('me.subtitle')}
           </p>
         </div>
         <Link
           href="/employees"
           className="rounded-lg px-2.5 py-1.5 text-[13.5px] font-medium text-ink-600 hover:bg-ink-100"
         >
-          Employee directory
+          {t('me.directory')}
         </Link>
       </div>
 
@@ -187,11 +210,11 @@ export default function MyProfilePage() {
                 </div>
 
                 <div className="grid grid-cols-2 gap-3 border-t border-ink-100 px-4 py-4 sm:grid-cols-4 sm:px-5">
-                  <Stat label="Joined" value={show(e.joined_on)} sub={serviceLength(e.joined_on) ?? undefined} />
-                  <Stat label="Reporting to" value={e.manager ?? 'No manager'} />
-                  <Stat label="Work location" value={show(e.work_location)} />
+                  <Stat label={t('emp.joined')} value={show(e.joined_on)} sub={serviceLength(e.joined_on, businessDate) ?? undefined} />
+                  <Stat label={t('me.reportingTo')} value={e.manager ?? 'No manager'} />
+                  <Stat label={t('ep.workLocation')} value={show(e.work_location)} />
                   <Stat
-                    label="This month"
+                    label={t('ep.thisMonth')}
                     value={att ? `${Number(att.present) + Number(att.wfh)} days` : '—'}
                     sub={att ? `${att.late} late · ${att.absent} absent` : undefined}
                   />
@@ -201,34 +224,34 @@ export default function MyProfilePage() {
               <div className="grid gap-5 lg:grid-cols-2">
                 {/* Employment ------------------------------------------------------- */}
                 <Card>
-                  <CardHead title="Employment" hint="Your current terms and lifecycle dates" />
+                  <CardHead title={t('me.employment')} hint={t('me.employmentHint')} />
                   <DetailList
                     rows={[
-                      { label: 'Employee ID', value: e.employee_number },
-                      { label: 'Status', value: e.status },
-                      { label: 'Employment type', value: e.employment_type },
-                      { label: 'Department', value: e.department },
-                      { label: 'Designation', value: e.designation },
-                      { label: 'Reporting manager', value: e.manager },
-                      { label: 'In this role since', value: e.assignment_since },
-                      { label: 'Joined on', value: e.joined_on },
-                      { label: 'Confirmed on', value: e.confirmed_on },
+                      { label: t('me.employeeId'), value: e.employee_number },
+                      { label: t('common.status'), value: e.status },
+                      { label: t('ep.employmentType'), value: e.employment_type },
+                      { label: t('emp.department'), value: e.department },
+                      { label: t('emp.designation'), value: e.designation },
+                      { label: t('ep.reportingManager'), value: e.manager },
+                      { label: t('me.inRoleSince'), value: e.assignment_since },
+                      { label: t('ep.joinedOn'), value: e.joined_on },
+                      { label: t('ep.confirmedOn'), value: e.confirmed_on },
                       {
-                        label: 'Probation ends',
+                        label: t('me.probationEnds'),
                         value: p.probation_end_on,
                         hint: p.probation_end_on ? undefined : 'not configured',
                       },
                       ...(p.resigned_on
                         ? [
-                            { label: 'Resignation date', value: p.resigned_on },
-                            { label: 'Last working day', value: p.last_working_day },
-                            { label: 'Notice days', value: p.notice_days },
+                            { label: t('me.resignationDate'), value: p.resigned_on },
+                            { label: t('me.lastWorkingDay'), value: p.last_working_day },
+                            { label: t('me.noticeDays'), value: p.notice_days },
                           ]
                         : []),
                       ...(p.exited_on
                         ? [
-                            { label: 'Left on', value: p.exited_on },
-                            { label: 'Exit type', value: p.exit_type },
+                            { label: t('me.leftOn'), value: p.exited_on },
+                            { label: t('me.exitType'), value: p.exit_type },
                           ]
                         : []),
                     ]}
@@ -238,24 +261,24 @@ export default function MyProfilePage() {
                 {/* Personal --------------------------------------------------------- */}
                 <Card>
                   <CardHead
-                    title="Personal details"
-                    hint="Visible only to you. Contact HR to correct anything here."
+                    title={t('me.personalDetails')}
+                    hint={t('me.personalHint')}
                   />
                   <DetailList
                     rows={[
-                      { label: 'Date of birth', value: p.date_of_birth },
-                      { label: 'Gender', value: p.gender },
-                      { label: 'Personal phone', value: p.personal_phone },
-                      { label: 'Personal email', value: p.personal_email },
-                      { label: 'Blood group', value: p.blood_group },
+                      { label: t('ep.dob'), value: p.date_of_birth },
+                      { label: t('ep.gender'), value: p.gender },
+                      { label: t('me.personalPhone'), value: p.personal_phone },
+                      { label: t('me.personalEmail'), value: p.personal_email },
+                      { label: t('me.bloodGroup'), value: p.blood_group },
                       {
-                        label: 'Address',
+                        label: t('me.address'),
                         value: [p.address_line1, p.address_line2, p.city, p.state_region, p.postal_code]
                           .filter(Boolean).join(', ') || null,
                       },
-                      { label: 'Emergency contact', value: p.emergency_contact_name },
-                      { label: 'Emergency phone', value: p.emergency_contact_phone },
-                      { label: 'Relationship', value: p.emergency_contact_relation },
+                      { label: t('me.emergencyContact'), value: p.emergency_contact_name },
+                      { label: t('me.emergencyPhone'), value: p.emergency_contact_phone },
+                      { label: t('me.relationship'), value: p.emergency_contact_relation },
                     ]}
                   />
                   <p className="border-t border-ink-100 px-4 py-3 text-[12.5px] text-ink-500 sm:px-5">
@@ -268,11 +291,11 @@ export default function MyProfilePage() {
               {/* Lifecycle ---------------------------------------------------------- */}
               <Card>
                 <CardHead
-                  title="Employment history"
-                  hint="Every recorded change, newest first. This log is append-only — entries are never edited or removed."
+                  title={t('me.employmentHistory')}
+                  hint={t('me.historyHint')}
                 />
                 {d.lifecycle.length === 0 ? (
-                  <Empty title="No lifecycle events recorded" />
+                  <Empty title={t('me.noLifecycle')} />
                 ) : (
                   <ol className="divide-y divide-ink-100">
                     {d.lifecycle.map((ev, i) => (
@@ -284,7 +307,7 @@ export default function MyProfilePage() {
                         <div className="min-w-0 flex-1">
                           <div className="flex flex-wrap items-center gap-2">
                             <span className="text-[13.5px] font-medium text-ink-900">
-                              {EVENT_LABEL[ev.event_type] ?? show(ev.event_type)}
+                              {EVENT_LABEL[ev.event_type] ? t(EVENT_LABEL[ev.event_type]) : show(ev.event_type)}
                             </span>
                             {ev.from_status !== ev.to_status && (
                               <span className="text-[12px] text-ink-500">
@@ -310,11 +333,11 @@ export default function MyProfilePage() {
               {/* Assignment history ---------------------------------------------- */}
                 <Card>
                   <CardHead
-                    title="Assignment history"
-                    hint="Effective-dated. A transfer or promotion opens a new period rather than overwriting the old one."
+                    title={t('ep.history')}
+                    hint={t('me.assignmentHistoryHint')}
                   />
                   {d.history.length === 0 ? (
-                    <Empty title="No assignment periods" />
+                    <Empty title={t('me.noAssignmentPeriods')} />
                   ) : (
                     <ul className="divide-y divide-ink-100">
                       {d.history.map((h) => (
@@ -341,7 +364,7 @@ export default function MyProfilePage() {
                 {/* Leave + projects ------------------------------------------------- */}
                 <div className="space-y-5">
                   <Card>
-                    <CardHead title="Leave balance" hint="Derived from the ledger, never edited directly" />
+                    <CardHead title={t('ep.leaveBalance')} hint={t('me.ledgerDerived')} />
                     <div className="grid grid-cols-2 gap-3 px-4 py-4 sm:grid-cols-3 sm:px-5">
                       {d.balances.map((b) => (
                         <Stat key={b.code} label={b.code} value={b.available} sub={`${b.taken} taken`} />
@@ -350,9 +373,9 @@ export default function MyProfilePage() {
                   </Card>
 
                   <Card>
-                    <CardHead title="My projects" />
+                    <CardHead title={t('dash.myProjects')} />
                     {d.projects.length === 0 ? (
-                      <Empty title="Not assigned to a project" />
+                      <Empty title={t('me.notOnProject')} />
                     ) : (
                       <ul className="divide-y divide-ink-100">
                         {d.projects.map((pr) => (

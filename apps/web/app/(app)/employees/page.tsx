@@ -5,6 +5,7 @@ import { useState } from 'react';
 import { fmtDate, useData } from '@/lib/api';
 import { Async, Badge, Button, Card, CardHead, Empty, inputCls } from '@/components/ui';
 import { AddEmployee } from '@/components/employee-master';
+import { useT } from '@/lib/i18n';
 
 interface Row {
   id: string; employee_number: string; full_name: string; work_email: string;
@@ -40,6 +41,7 @@ function DocsCell({ e }: { e: Row }) {
 }
 
 export default function EmployeesPage() {
+  const t = useT();
   const [q, setQ] = useState('');
   const [adding, setAdding] = useState(false);
   const [tick, setTick] = useState(0);
@@ -61,7 +63,7 @@ export default function EmployeesPage() {
     <div className="space-y-5">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
-          <h1 className="text-[21px] font-semibold text-ink-900">Employees</h1>
+          <h1 className="text-[21px] font-semibold text-ink-900">{t('nav.employees')}</h1>
           <p className="mt-0.5 text-[13.5px] text-ink-500">
           Department, designation and line manager are resolved as of today from the effective-dated
           assignment.
@@ -72,18 +74,18 @@ export default function EmployeesPage() {
         </div>
         {/* Offered only when the API says the caller holds people.employee.create. */}
         {state.data?.canCreate && (
-          <Button onClick={() => setAdding(true)}>Add employee</Button>
+          <Button onClick={() => setAdding(true)}>{t('emp.add')}</Button>
         )}
       </div>
 
       <Card>
         <CardHead
-          title="Directory"
+          title={t('emp.directory')}
           action={
             <div className="w-full sm:w-64">
-              <label htmlFor="emp-search" className="sr-only">Search employees</label>
+              <label htmlFor="emp-search" className="sr-only">{t('emp.search')}</label>
               <input
-                id="emp-search" type="search" className={inputCls} placeholder="Search by name or number"
+                id="emp-search" type="search" className={inputCls} placeholder={t('emp.searchBy')}
                 value={q} onChange={(e) => setQ(e.target.value)}
               />
             </div>
@@ -93,24 +95,24 @@ export default function EmployeesPage() {
           state={state}
           rows={5}
           isEmpty={(d) => d.employees.length === 0}
-          empty={<Empty title="No employees match that search" hint="Try a different name or employee number." />}
+          empty={<Empty title={t('emp.noMatch')} hint={t('emp.noMatchHint')} />}
         >
           {(d) => (
             <>
               {/* Table on wide screens, cards on narrow. Same data, no horizontal scroll. */}
               <div className="hidden overflow-x-auto sm:block">
-                <table className="w-full text-left text-[13.5px]">
+                <table className="w-full text-start text-[13.5px]">
                   <thead className="border-b border-ink-100 text-[12px] uppercase tracking-wide text-ink-400">
                     <tr>
-                      <th scope="col" className="px-5 py-2.5 font-medium">Employee</th>
-                      <th scope="col" className="px-3 py-2.5 font-medium">Department</th>
-                      <th scope="col" className="px-3 py-2.5 font-medium">Designation</th>
-                      <th scope="col" className="px-3 py-2.5 font-medium">Manager</th>
-                      <th scope="col" className="px-3 py-2.5 font-medium">Joined</th>
+                      <th scope="col" className="px-5 py-2.5 font-medium">{t('common.employee')}</th>
+                      <th scope="col" className="px-3 py-2.5 font-medium">{t('emp.department')}</th>
+                      <th scope="col" className="px-3 py-2.5 font-medium">{t('emp.designation')}</th>
+                      <th scope="col" className="px-3 py-2.5 font-medium">{t('emp.manager')}</th>
+                      <th scope="col" className="px-3 py-2.5 font-medium">{t('emp.joined')}</th>
                       {d.showDocumentCounts && (
-                        <th scope="col" className="px-3 py-2.5 font-medium">Documents</th>
+                        <th scope="col" className="px-3 py-2.5 font-medium">{t('docs.title')}</th>
                       )}
-                      <th scope="col" className="px-5 py-2.5 font-medium">Status</th>
+                      <th scope="col" className="px-5 py-2.5 font-medium">{t('common.status')}</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-ink-100">
@@ -153,7 +155,7 @@ export default function EmployeesPage() {
                         </div>
                         {d.showDocumentCounts && (
                           <div className="mt-1 text-[12.5px]">
-                            <span className="text-ink-400">Documents: </span>
+                            <span className="text-ink-400">{t('emp.documentsCount')} </span>
                             <DocsCell e={e} />
                           </div>
                         )}
