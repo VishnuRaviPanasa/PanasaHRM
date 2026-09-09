@@ -98,11 +98,11 @@ Class **A/B** by changed paths (infrastructure, docs, one auth line, seven web c
 schema change, no authorization change, no migration.
 
 **Asked for:** the `hr-agent` deployment shape (`C:/Users/.../Project/hr-agent`), reproduced for
-PanasaHRM on `127.0.0.1:4787`.
+PanasaHRM on `127.0.0.1:4787` - since moved to **4788**, see DEC-109.
 
 | Area | What landed |
 |---|---|
-| `infrastructure/compose/docker-compose.prod.yml` | postgres 18 - minio - one-shot `migrate` - api - web - edge nginx. **Only nginx publishes a port, `127.0.0.1:4787:80`.** Every secret is `${VAR:?...}` with no default |
+| `infrastructure/compose/docker-compose.prod.yml` | postgres 18 - minio - one-shot `migrate` - api - web - edge nginx. **Only nginx publishes a port** (`127.0.0.1:4788:80` as of DEC-109). Every secret is `${VAR:?...}` with no default |
 | `infrastructure/docker/{api,web,migrate}.Dockerfile` | Multi-stage, repo-root build context (npm workspaces). API: dev-free second install. Web: Next `output: 'standalone'`. Migrate: `postgres:18-alpine` + nodejs, because `migrate.mjs` drives psql and the client must match the server |
 | `infrastructure/nginx/{nginx.conf,hrm_proxy_params}` | A WHOLE nginx.conf (DEC-095), realip-corrected rate limiting (DEC-096), 4 security headers with `always`, 26m body cap, `/api/` prefix PRESERVED for Nest's global prefix |
 | `deploy.sh` | Preflight (env file present AND no blank secret), pull, build, explicit `run --rm migrate up`, `up -d`, then a THREE-probe verify (DEC-097) |
@@ -148,17 +148,21 @@ real `panasahrm` project and its volumes were never created.
 3. **nginx crash-looped on a duplicate `proxy_read_timeout`** (DEC-104) - `location /api/` set it
    after including the shared params, which already had it.
 
-### Port 4787 is TAKEN ON THIS WINDOWS MACHINE
+### The published port is 4788 (was 4787) - DEC-109
 
-`127.0.0.1:4787` is held by **Code.exe (VS Code), PID 4740**, so the verification ran on 4788.
-This is a dev-machine artifact, not the deploy target - but **check the VM before deploying**:
+`127.0.0.1:4787` was held by **Code.exe (VS Code), PID 4740** on this machine, so every
+verification ran on 4788 while the configuration still said 4787. That gap - tested on one port,
+shipping another - is now closed: **`HRM_PUBLISH_PORT=4788`** throughout, and `deploy.sh` reads
+the value back out of `prod.env` so its health probes follow whatever is configured.
+
+Still confirm on the VM before deploying, because 4788 being free here proves nothing there:
 
 ```bash
-ss -ltnp | grep 4787     # must print nothing
+ss -ltnp | grep 4788     # must print nothing
 ```
 
-The configured value is still 4787. Change `HRM_PUBLISH_PORT` in `prod.env` and the host-nginx
-upstream together if it turns out to be taken there too.
+If it is taken, change `HRM_PUBLISH_PORT` in `prod.env` **and** the `panasa_hrm_app` upstream in
+the host nginx together.
 
 ### Machine notes
 
@@ -179,8 +183,8 @@ Four files had committed markers: `apps/api/src/auth.ts`, `.gitignore`, `.docker
 
 **The two stacks were different TOPOLOGIES, not variants.** Theirs bound host `:80`/`:443` and
 terminated its own TLS from `HRM_TLS_DIR`, which assumes PanasaHRM owns the VM. Ours publishes
-`127.0.0.1:4787` plain HTTP behind the shared host nginx that already fronts `/hr-agent/`.
-**User chose 4787** - that is the real host arrangement (DEC-105).
+`127.0.0.1:4788` plain HTTP behind the shared host nginx that already fronts `/hr-agent/`.
+**User chose the loopback-behind-host-nginx model** - that is the real host arrangement (DEC-105).
 
 **Adopted from their branch, because it was better:**
 
@@ -227,7 +231,7 @@ Built and run under `-p panasahrm-verify` with throwaway secrets; volumes remove
 
 ### Exact next action
 
-1. **On the VM: `ss -ltnp | grep 4787`**, then `cp infrastructure/compose/prod.env.template
+1. **On the VM: `ss -ltnp | grep 4788`**, then `cp infrastructure/compose/prod.env.template
    infrastructure/compose/prod.env`, fill the three secrets, and run `./deploy.sh`. The stack is
    proven to come up; what has never been exercised is `deploy.sh` itself end to end (the
    verification drove compose directly, with a scratchpad env file).

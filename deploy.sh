@@ -2,7 +2,7 @@
 #
 # PanasaHRM production deploy (ADR-0013: Docker Compose on a single VM).
 #
-#   host nginx (TLS :7777) --/panasa-hrm/-->  127.0.0.1:4787  -->  nginx --> web :3100
+#   host nginx (TLS :7777) --/panasa-hrm/-->  127.0.0.1:4788  -->  nginx --> web :3100
 #                                                                        `-> api :4000
 #
 # Usage:
@@ -71,7 +71,7 @@ fi
 # Read the published port back out of the env file so the health check below cannot drift from
 # what compose actually publishes.
 PORT="$(grep -E '^HRM_PUBLISH_PORT=' "$ENV_FILE" | tail -n1 | cut -d= -f2- || true)"
-PORT="${PORT:-4787}"
+PORT="${PORT:-4788}"
 BASE="$(grep -E '^NEXT_PUBLIC_BASE_PATH=' "$ENV_FILE" | tail -n1 | cut -d= -f2- || true)"
 BASE="${BASE%/}"
 

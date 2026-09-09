@@ -7,7 +7,7 @@ host nginx that terminates TLS and path-routes every app on the box.
 browser
   │  https
   ▼
-host nginx (TLS :7777)  ──/panasa-hrm/──►  127.0.0.1:4787
+host nginx (TLS :7777)  ──/panasa-hrm/──►  127.0.0.1:4788
                                                  │  edge nginx (:80)  — headers, rate limits, body cap
                                                  ├── /api/  ──►  api  :4000   NestJS 11 / Node 24
                                                  └── /      ──►  web  :3100   Next.js 16 (standalone)
@@ -18,9 +18,10 @@ host nginx (TLS :7777)  ──/panasa-hrm/──►  127.0.0.1:4787
                                        migrate  ── one-shot, runs to completion, then exits
 ```
 
-**4787** is this app's slot on the host. 4765, 4766 and 4767 are already taken (4767 is the
-resume-filtering agent). Only the edge nginx publishes a port, and it publishes to `127.0.0.1`
-only — PostgreSQL and MinIO are reachable on the compose network and nowhere else.
+**4788** is this app's slot on the host. 4765, 4766 and 4767 belong to other apps (4767 is the
+resume-filtering agent), and **4787 was found already in use**, so the slot moved up one. Only
+the edge nginx publishes a port, and it publishes to `127.0.0.1` only — PostgreSQL, MinIO and
+Redis are reachable on the compose network and nowhere else.
 
 | Piece | File |
 |---|---|
@@ -134,7 +135,7 @@ loopback ports. Add PanasaHRM alongside them, in e.g. `/etc/nginx/conf.d/ai.conf
 ```nginx
 # --- alongside the other upstream { } blocks ---
 upstream panasa_hrm_app {
-    server 127.0.0.1:4787;
+    server 127.0.0.1:4788;
 }
 
 # --- inside the `server { listen 7777 ssl ... }` block ---
@@ -165,11 +166,13 @@ sudo nginx -t && sudo systemctl reload nginx
 ### Check the port is free on the host first
 
 ```bash
-ss -ltnp | grep 4787     # must print nothing
+ss -ltnp | grep 4788     # must print nothing
 ```
 
-4787 was chosen because 4765/4766/4767 are taken. If something already holds it, change
-`HRM_PUBLISH_PORT` in `prod.env` **and** the `panasa_hrm_app` upstream above — they must agree.
+4788 was chosen because 4765/4766/4767 belong to other apps and 4787 turned out to be in use
+too. If something already holds 4788 on the VM, change `HRM_PUBLISH_PORT` in `prod.env` **and**
+the `panasa_hrm_app` upstream above — they must agree, and `deploy.sh` reads the port back out of
+`prod.env` so its health probes follow automatically.
 
 ### The base path is a BUILD-time value
 

@@ -1,6 +1,6 @@
 # PanasaHRM production stack - Docker Compose on a single VM (ADR-0013).
 #
-#   host nginx (TLS :7777) --/panasa-hrm/-->  127.0.0.1:4787
+#   host nginx (TLS :7777) --/panasa-hrm/-->  127.0.0.1:4788
 #                                                   |  nginx (edge, :80)
 #                                                   |-- /api/ -->  api  :4000   (NestJS 11)
 #                                                   `-- /     -->  web  :3100   (Next.js 16)
@@ -10,8 +10,8 @@
 #
 # TOPOLOGY: this app does NOT own the host. The VM already runs several apps behind one nginx
 # that terminates TLS on :7777 and path-routes to loopback ports (/hr-agent/ is on 4767).
-# PanasaHRM takes 4787. So the edge nginx here speaks PLAIN HTTP on loopback and mounts no
-# certificate - TLS ends one hop upstream.
+# PanasaHRM takes 4788 (4787 was already in use). So the edge nginx here speaks PLAIN HTTP on
+# loopback and mounts no certificate - TLS ends one hop upstream.
 #
 # ONLY the edge nginx publishes a host port, and only to 127.0.0.1. PostgreSQL, MinIO and Redis
 # are reachable on the compose network and nowhere else - never expose a database, or an object
@@ -309,8 +309,8 @@ services:
       - ../nginx/hrm_proxy_params:/etc/nginx/hrm_proxy_params:ro
     ports:
       # Loopback only. The host nginx terminates TLS on :7777 and reverse-proxies to this port.
-      # 4765/4766/4767 are already taken on that host, so PanasaHRM uses 4787.
-      - "127.0.0.1:${HRM_PUBLISH_PORT:-4787}:80"
+      # 4765/4766/4767 belong to other apps on that host and 4787 was in use too, so 4788.
+      - "127.0.0.1:${HRM_PUBLISH_PORT:-4788}:80"
     depends_on:
       web:
         condition: service_started

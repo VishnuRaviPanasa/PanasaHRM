@@ -11,7 +11,7 @@ An earlier version of this file documented a different topology: the stack's own
 host `:80`/`:443` and terminating TLS from a mounted certificate, i.e. PanasaHRM owning the whole
 VM. **That is not how it is deployed.** The VM already runs several applications behind one nginx
 that terminates TLS on `:7777` and path-routes to loopback ports, so this stack publishes
-`127.0.0.1:4787` and speaks plain HTTP, with TLS ending one hop upstream.
+`127.0.0.1:4788` and speaks plain HTTP, with TLS ending one hop upstream.
 
 Two runbooks describing two topologies is how somebody follows the wrong one at 2am, which is
 exactly what this directory's README says a runbook exists to prevent. The good parts of that

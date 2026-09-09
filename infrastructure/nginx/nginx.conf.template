@@ -1,6 +1,6 @@
 # PanasaHRM edge nginx - the single door into the stack.
 #
-#   browser -> host nginx (TLS :7777) -> 127.0.0.1:4787 -> THIS nginx :80
+#   browser -> host nginx (TLS :7777) -> 127.0.0.1:4788 -> THIS nginx :80
 #                                                            |-- /api/ -> api:4000  (NestJS)
 #                                                            `-- /     -> web:3100  (Next.js)
 #

@@ -6,7 +6,7 @@
 | `db/seeds/` | Dev and demo seed data |
 | `compose/` | `docker-compose.{dev,prod}.yml`, plus `prod.env.template` (the deploy secrets template - the real `prod.env` is gitignored) |
 | `docker/` | Dockerfiles - `api`, `web` and the one-shot `migrate` runner. All three build from the REPOSITORY ROOT, because this is an npm-workspaces monorepo |
-| `nginx/` | The edge reverse proxy: security headers, rate limiting, body-size caps. **TLS is NOT here** - the host nginx terminates it and proxies to `127.0.0.1:4787` |
+| `nginx/` | The edge reverse proxy: security headers, rate limiting, body-size caps. **TLS is NOT here** - the host nginx terminates it and proxies to `127.0.0.1:4788` |
 
 ## Migration rules
 
@@ -29,5 +29,5 @@ cp compose/prod.env.template compose/prod.env   # fill in the three secrets
 ../deploy.sh
 ```
 
-The stack publishes **one** host port - `127.0.0.1:4787` on the edge nginx. PostgreSQL and MinIO
+The stack publishes **one** host port - `127.0.0.1:4788` on the edge nginx. PostgreSQL and MinIO
 have no host port at all.
