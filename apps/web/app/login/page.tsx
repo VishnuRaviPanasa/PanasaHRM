@@ -12,10 +12,30 @@ const DEMO_USERS = [
   { email: 'deepa.suresh@panasatech.com', label: 'Deepa Suresh', role: 'HR Manager' },
 ];
 
+/*
+ * THE DEMO PANEL IS OFF UNLESS SOMEBODY TURNS IT ON, and it never shows a password.
+ *
+ * This page used to hardcode the shared demo password in three places: the initial password
+ * state, the per-account click handler, and a line that displayed it outright. On localhost that
+ * is a convenience. On a reachable host it is a working credential published on an unauthenticated
+ * page - anyone who finds the URL signs in as HR Manager and reads every payslip, document, salary
+ * figure and home address in the system. The literal is not repeated here, so a secret scanner
+ * has nothing to find and nobody can copy it out of a comment.
+ *
+ * It also actively broke the first hosted deployment. The deploy correctly set HRM_DEMO_PASSWORD
+ * to a generated value, so the prefilled literal was simply wrong, and the page confidently
+ * displayed a password that could not work - which reads as "the app is broken" rather than
+ * "you typed the wrong password".
+ *
+ * So: opt-in, and the password is never rendered at all. Selecting an account fills the EMAIL and
+ * clears the password, because the point of the shortcut is not having to type an address.
+ */
+const SHOW_DEMO = process.env.NEXT_PUBLIC_SHOW_DEMO_ACCOUNTS === 'true';
+
 export default function LoginPage() {
   const router = useRouter();
-  const [email, setEmail] = useState('vishnu.ravi@panasatech.com');
-  const [password, setPassword] = useState('panasa2026');
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -100,24 +120,36 @@ export default function LoginPage() {
             <Button type="submit" busy={busy} className="w-full">Sign in</Button>
           </form>
 
-          <div className="mt-8 rounded-lg bg-ink-100 p-3.5">
-            <p className="text-[12px] font-semibold uppercase tracking-wide text-ink-500">Demo accounts</p>
-            <ul className="mt-2 space-y-1">
-              {DEMO_USERS.map((u) => (
-                <li key={u.email}>
-                  <button
-                    type="button"
-                    onClick={() => { setEmail(u.email); setPassword('panasa2026'); setError(null); }}
-                    className="flex w-full items-baseline justify-between gap-3 rounded px-1.5 py-1 text-left text-[13px] hover:bg-white"
-                  >
-                    <span className="font-medium text-ink-800">{u.label}</span>
-                    <span className="text-ink-500">{u.role}</span>
-                  </button>
-                </li>
-              ))}
-            </ul>
-            <p className="mt-2 px-1.5 text-[12px] text-ink-500">Password for all: panasa2026</p>
-          </div>
+          {SHOW_DEMO && (
+            <div className="mt-8 rounded-lg bg-ink-100 p-3.5">
+              <p className="text-[12px] font-semibold uppercase tracking-wide text-ink-500">
+                Demo accounts
+              </p>
+              <ul className="mt-2 space-y-1">
+                {DEMO_USERS.map((u) => (
+                  <li key={u.email}>
+                    <button
+                      type="button"
+                      onClick={() => { setEmail(u.email); setPassword(''); setError(null); }}
+                      className="flex w-full items-baseline justify-between gap-3 rounded px-1.5 py-1 text-left text-[13px] hover:bg-white"
+                    >
+                      <span className="font-medium text-ink-800">{u.label}</span>
+                      <span className="text-ink-500">{u.role}</span>
+                    </button>
+                  </li>
+                ))}
+              </ul>
+              {/*
+                * No password here, and not because it is inconvenient to show. The demo password
+                * is whatever HRM_DEMO_PASSWORD was set to at seed time - this page cannot know it,
+                * and the previous hardcoded value was wrong the moment a deployment set a real one.
+                */}
+              <p className="mt-2 px-1.5 text-[12px] text-ink-500">
+                Selecting a name fills the email. Ask whoever set up this environment for the
+                password.
+              </p>
+            </div>
+          )}
         </div>
       </section>
     </main>

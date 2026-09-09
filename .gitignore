@@ -59,3 +59,6 @@ infrastructure/compose/docker-compose.verify.yml
 
 # Generated deliverable - rebuilt from docs/runbooks/deployment.md, not a source file
 ART-HRM-Deployment-Runbook.docx
+
+# Word lock files, created while a .docx is open
+~$*
