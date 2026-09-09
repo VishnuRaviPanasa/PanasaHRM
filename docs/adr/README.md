@@ -35,6 +35,7 @@ what remains open are in `adr-review-report.md` and `adr-review-report-pass2.md`
 | [0017](0017-work-log-privacy-posture.md) | Purpose-bound, not a productivity signal | An honest log is only possible when it is not graded |
 | [0018](0018-standalone-application.md) | No dependency on any existing system | Zero coupling, at the price of some duplicate data entry |
 | [0019](0019-configuration-model.md) | Effective-dated policy vs mutable settings | A mutable settings row would silently rewrite history on every recompute |
+| [0020](0020-onboarding-boundary.md) | The approval chain lives here, on a pre-boarding employee | An annexure is not a payslip, and the author may not approve it |
 
 ## Accepting an ADR
 

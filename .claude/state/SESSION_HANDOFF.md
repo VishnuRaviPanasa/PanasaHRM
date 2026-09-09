@@ -21,6 +21,109 @@ report was reviewed.
 
 ---
 
+## 2026-09-09, latest: ONB-01 the onboarding approval chain
+
+Asked for: "employee creation, documents upload, payslip creation, send payslip to finance head
+for approval, delivery head approval, offer letter creation... we need finance head user type,
+delivery head user type."
+
+**This overrode ADR-0020's proposed boundary**, which had suggested leaving the pre-offer chain in
+Hiremate. The ADR is REVISED (still Proposed, still needs a human) and its Context is deliberately
+left intact - the argument against this scope is what a future reader most needs.
+
+| Migration | What |
+|---|---|
+| **0031** | 7th role `delivery_head`; `ck_app_user_role` widened to match the grant table (a finance head could not be given a login before); `offer_declined` terminal from `pre_boarding` only |
+| **0032** | `salary_annexure` + components + FSM-as-data + append-only event log. Components FROZEN once out of draft; components must reconcile against a separately-typed CTC before submission |
+| **0033** | A decline may precede the joining date - 0014's guard forbade it, which would have failed on the first real decline |
+
+Also: `packages/authz` 447 -> 536 (413 cells, 7 roles, 59 actions), `apps/api/src/onboarding.ts`,
+`/onboarding` screen with its own nav gate, EMP007 Arun Thomas (finance) and EMP008 Nisha Varghese
+(delivery) seeded, `onboarding:test` 24 checks, browser B29a-f.
+
+### The three findings worth remembering
+
+1. **What finance approves is an ANNEXURE, not a payslip** (DEC-137). Asking settled the schema
+   before a forward-only migration existed.
+2. **A decline necessarily precedes the joining date** (DEC-140). Caught by 0014's own rail during
+   verification, not in production.
+3. **The seed teardown was missed twice in one day** (DEC-141) - `user_activation` and then the
+   annexure tables. Only `punch:test` and `demo:test` notice, because they are the only two that
+   re-seed. The rule is now written into the teardown block itself.
+
+### NOT built, and deliberately
+
+Documents upload already existed and was not touched. The offer letter is a STATUS and an
+`offer_document_id` column - **generating the PDF is not implemented**; HR uploads it through the
+existing documents module. No JIRA equivalent (ADR-0018: JIRA is an application, SMTP is
+infrastructure). No induction training, equipment requests or onboarding checklist. Nothing
+notifies an approver that something is waiting - there is no outbox drain worker.
+
+### Exact next action
+
+1. **A human decides ADR-0020.** If Accepted, `ai/context/architecture-principles.md` must go from
+   ten bounded contexts to eleven, or the list and the ADR disagree.
+2. Commit. Nothing in this or the previous two sections is committed.
+3. Then: offer-letter generation, and notifying an approver that something is in their queue.
+
+---
+
+## 2026-09-09, later: ACCT-01 account provisioning, and ADR-0020 for onboarding
+
+Asked: "can we implement hiremate (candidate onboarding) application's features here. Also user
+account creation also need to done." Two very different answers.
+
+### Account creation - DONE, uncommitted
+
+The long-flagged blocker is closed. Read `docs/governance/decisions.md` DEC-129 for the design and
+DEC-130 for the hole in the first version.
+
+| File | What |
+|---|---|
+| `0029_account_activation.sql` | `user_activation` - SHA-256 only, 7-day expiry, one live token per account (partial unique index), immutable but for its consumption, and **an activation may not be issued for an account that already has a password** |
+| `0030_pin_activation_search_path.sql` | Pins `search_path` on both 0029 functions. N11 caught it; unpinned, the takeover rail could be defeated by a `pg_temp` shadow table |
+| `packages/authz` | `identity.account.create`, `identity.account.reissue` - hr_admin only, break-glass denied. 435 -> 447 |
+| `apps/api/src/accounts.ts` | `@Controller('identity')`: create, reissue, state read, and a PUBLIC `POST /identity/activate` |
+| `apps/web/components/account-card.tsx` | The Login panel on the employee profile |
+| `apps/web/app/activate/page.tsx` | Outside `(app)` - the person has no session yet, by definition |
+| seed | **EMP006 Meera Nair, no login** - the fixture, and why it must be seeded is DEC-131 |
+
+**What is NOT built and was scoped out deliberately:** disable/re-enable an account, password reset
+for an existing credential (a different act, belonging to the holder), Entra linking
+(`identity.link.create` has a matrix row and no endpoint), and provisioning `hr_ops`/`finance`/
+`auditor` - blocked by `ck_app_user_role` still permitting three values on the column. Argon2id is
+still TRACK B: this writes scrypt because that is what `AuthService.verify` parses, and writing
+argon2id would lock out the employee who just activated.
+
+### Onboarding - ADR-0020 DRAFTED, needs a human
+
+`docs/adr/0020-onboarding-boundary.md`, status **Proposed**. Proposes the boundary at
+`offer_accepted`: Hiremate keeps candidates, documents, background verification, finance/delivery
+review and the offer; this system takes employee-ID assignment, induction training, equipment and
+first-day tasks, as an eleventh `onboarding` bounded context that is a LEAF. **No code was written
+for it.** Two findings worth keeping: ADR-0018 already classifies SMTP as *infrastructure* and
+therefore permitted, but **JIRA is an application, so `jira_triggered` cannot be reproduced as an
+API call without superseding ADR-0018**; and roughly half of Hiremate duplicates what exists here
+already (its hand-rolled `STATUS_RANK`/`STATUS_PREDECESSOR` machine vs ADR-0007's FSM-as-data, its
+Azure-Blob document store vs `documents` on MinIO, its notifications, its users and auth).
+If ADR-0020 is Accepted, `ai/context/architecture-principles.md` must go from ten contexts to
+eleven - the ADR outranks it and the two must not disagree.
+
+### Also in the tree
+
+The login language switcher fix (DEC-128) - 2.07:1 contrast on the dark panel, and completely
+absent below 1024px.
+
+### Exact next action
+
+1. **A human decides ADR-0020** - accept, reject, or amend the boundary. No onboarding code should
+   exist before that.
+2. Commit. Nothing in this section is committed.
+3. Then, if account provisioning is to be complete: disable/enable an account, and the endpoint for
+   `identity.role.grant` so the three wider roles are reachable.
+
+---
+
 ## Completed this session
 
 | Area | What landed |
