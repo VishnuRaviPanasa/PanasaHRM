@@ -1,0 +1,44 @@
+# The build context is the repository root for all three images, so everything that is large,
+# machine-local or secret is excluded here rather than in three separate files.
+
+# dependencies and build output - reinstalled/rebuilt inside the image
+node_modules/
+**/node_modules/
+dist/
+**/dist/
+.next/
+**/.next/
+out/
+build/
+*.tsbuildinfo
+
+# secrets - injected at runtime via the compose env file, NEVER baked into an image
+.env
+.env.*
+**/.env
+**/.env.*
+secrets/
+*.pem
+*.key
+*.p12
+*.pfx
+infrastructure/compose/prod.env
+
+# history and machine-local state
+.git/
+.gitignore
+.claude/
+ai/
+docs/
+
+# test and tooling output
+coverage/
+playwright-report/
+test-results/
+*.log
+
+# editor / OS
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/

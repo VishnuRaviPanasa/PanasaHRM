@@ -49,3 +49,6 @@ tmp/
 # `**/` because a pattern containing a slash is anchored to this file's directory, and
 # the workspaces keep their own copies (apps/api, apps/web).
 **/.claude/state/dirty-files.txt
+
+# production secrets - the deploy env file, never committed (template: prod.env.template)
+infrastructure/compose/prod.env

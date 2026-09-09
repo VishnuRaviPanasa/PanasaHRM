@@ -9,6 +9,15 @@ import { Db } from './db';
 
 export const COOKIE = 'hrm_session';
 
+/**
+ * Whether the session cookie is marked Secure. Read once at module load, so a deployment cannot
+ * end up serving some logins with the flag and some without.
+ *
+ * Default false, because the default target is local plain-HTTP development. Every deployment
+ * reached over https must set HRM_COOKIE_SECURE=true - the production compose does.
+ */
+const SECURE_COOKIE = (process.env.HRM_COOKIE_SECURE ?? 'false') === 'true';
+
 /** Mirrors ck_user_role_value in migration 0016. */
 export type Role = 'employee' | 'manager' | 'hr_admin' | 'hr_ops' | 'finance' | 'auditor';
 
@@ -302,7 +311,20 @@ export class AuthController {
     res.cookie(COOKIE, token, {
       httpOnly: true, sameSite: 'lax', path: '/',
       maxAge: 12 * 60 * 60 * 1000,
-      // secure: true, and the __Host- prefix, arrive with TLS (ADR-0010).
+      // ADR-0010 requires Secure. It cannot be unconditional, because local development is
+      // plain HTTP and a Secure cookie is simply not stored there - the whole app would stop
+      // logging in. So it follows the deployment: the production compose sets
+      // HRM_COOKIE_SECURE=true, since the host nginx terminates TLS in front of this stack.
+      //
+      // TLS terminating one hop upstream does NOT make this optional. Without Secure the
+      // browser will send the session cookie over a plain-HTTP request to the same host, which
+      // is precisely what an attacker on the network arranges.
+      //
+      // STILL OUTSTANDING from ADR-0010: the `__Host-` prefix on the cookie NAME. It requires
+      // Secure (now available), Path=/ (already) and no Domain (already), so it is a rename and
+      // a session-invalidating deploy, not a behaviour change. Not done here because renaming
+      // the cookie logs every user out and belongs in its own change.
+      secure: SECURE_COOKIE,
     });
     return { actor };
   }
@@ -310,7 +332,9 @@ export class AuthController {
   @Post('logout')
   async logout(@Req() req: Request, @Res({ passthrough: true }) res: Response) {
     await this.auth.logout(req.cookies?.[COOKIE], clientIp(req));
-    res.clearCookie(COOKIE, { path: '/' });
+    // The clearing cookie must carry the same attributes as the one it replaces, or the browser
+    // treats it as a different cookie and the original survives the logout.
+    res.clearCookie(COOKIE, { path: '/', httpOnly: true, sameSite: 'lax', secure: SECURE_COOKIE });
     return { ok: true };
   }
 

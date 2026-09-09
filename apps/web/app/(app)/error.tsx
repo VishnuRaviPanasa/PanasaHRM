@@ -1,6 +1,7 @@
 'use client';
 
 import { Button } from '@/components/ui';
+import { withBasePath } from '@/lib/base-path';
 
 export default function AppError({ error, reset }: { error: Error; reset: () => void }) {
   return (
@@ -11,7 +12,7 @@ export default function AppError({ error, reset }: { error: Error; reset: () => 
       </p>
       <div className="mt-4 flex justify-center gap-2">
         <Button onClick={reset}>Try again</Button>
-        <Button variant="secondary" onClick={() => (window.location.href = '/')}>Back to dashboard</Button>
+        <Button variant="secondary" onClick={() => (window.location.href = withBasePath('/'))}>Back to dashboard</Button>
       </div>
     </div>
   );

@@ -90,6 +90,100 @@
 
 ---
 
+---
+
+## 2026-09-09, later session: DEPLOY-01 - the production deployment stack
+
+Class **A/B** by changed paths (infrastructure, docs, one auth line, seven web call sites). No
+schema change, no authorization change, no migration.
+
+**Asked for:** the `hr-agent` deployment shape (`C:/Users/.../Project/hr-agent`), reproduced for
+PanasaHRM on `127.0.0.1:4787`.
+
+| Area | What landed |
+|---|---|
+| `infrastructure/compose/docker-compose.prod.yml` | postgres 18 - minio - one-shot `migrate` - api - web - edge nginx. **Only nginx publishes a port, `127.0.0.1:4787:80`.** Every secret is `${VAR:?...}` with no default |
+| `infrastructure/docker/{api,web,migrate}.Dockerfile` | Multi-stage, repo-root build context (npm workspaces). API: dev-free second install. Web: Next `output: 'standalone'`. Migrate: `postgres:18-alpine` + nodejs, because `migrate.mjs` drives psql and the client must match the server |
+| `infrastructure/nginx/{nginx.conf,hrm_proxy_params}` | A WHOLE nginx.conf (DEC-095), realip-corrected rate limiting (DEC-096), 4 security headers with `always`, 26m body cap, `/api/` prefix PRESERVED for Nest's global prefix |
+| `deploy.sh` | Preflight (env file present AND no blank secret), pull, build, explicit `run --rm migrate up`, `up -d`, then a THREE-probe verify (DEC-097) |
+| `DEPLOY.md` | The runbook, including the host-nginx block, the build-time base path, backups pointing at `/var/lib/postgresql/18/docker`, and a "Known gaps" table |
+| `infrastructure/compose/prod.env.template` | Deliberately not `.env.example` - writing to `.env*` is a Forbidden Action. `prod.env` added to `.gitignore` |
+| `apps/api/src/auth.ts` | **`secure: HRM_COOKIE_SECURE`** on the session cookie, and the matching attributes on `clearCookie` (DEC-099). This closes the code's own TODO now that TLS exists |
+| `apps/web/lib/base-path.ts` + 4 files | `NEXT_PUBLIC_BASE_PATH` support for path-routing behind the host nginx (DEC-100). Default empty = byte-identical to before |
+| `apps/web/next.config.ts` | `output: 'standalone'`, `outputFileTracingRoot` at the repo root, conditional `basePath`/`assetPrefix` |
+| Decisions | **DEC-094 - DEC-101** |
+
+### VERIFIED BY RUNNING THE WHOLE STACK
+
+Docker was started and the stack was built and run end to end under an isolated project name
+(`-p panasahrm-verify`, throwaway secrets in the scratchpad, volumes removed afterwards). The
+real `panasahrm` project and its volumes were never created.
+
+| Check | Result |
+|---|---|
+| All three images build | **PASS** (`api` 979 MB, `web` 414 MB, `migrate` 515 MB) |
+| `migrate` one-shot against an empty volume | **PASS - 26/26 applied**, exit 0 |
+| postgres / minio / api / web / nginx | **all reported healthy** by their own healthchecks |
+| `nginx -t` inside the container | **PASS** |
+| `/healthz` | **200** |
+| `/panasa-hrm/api/auth/me` | **401** `{"message":"Not signed in",...}` - through the edge, not through Next |
+| `/panasa-hrm/login` | **200** |
+| Page's real asset URLs (`/panasa-hrm/_next/static/*.js`, `*.css`) | **200** - and no root-absolute `/_next` or `/api` left in the HTML |
+| Login rate limit (10r/m, burst 5) | **PASS** - `401 401 401 401 401 401 429 429` |
+| Security headers present on a 4xx | **PASS** (`always` is doing its job) |
+| Template rendered with base path AND empty | both **valid** |
+| `authz:test` / `upload:test` / hooks | 423 / 45 / 99, 0 failed |
+| DB-backed suites (`db:verify`, `demo`, `nav`, `payslip`, ...) | **NOT RUN** - they target the dev stack on 55432, not this one |
+
+### THREE REAL BUGS, all found only by running it
+
+1. **nginx never routed the API** (DEC-102). `location /api/` does not match `/panasa-hrm/api/...`,
+   so every API call fell through to `location /` and Next proxied it onward. **Silent** - the app
+   would have worked, with a Node hop in front of every document stream. Fixed by making the
+   config an envsubst template driven by `HRM_BASE_PATH`.
+2. **`HRM_API_ORIGIN` was inert** (DEC-103). Next bakes `rewrites()` into the routes manifest at
+   `next build`, so the runtime env var did nothing and the web container logged
+   `ECONNREFUSED 127.0.0.1:4000` while the API answered 401 perfectly well on `api:4000`. It is a
+   build arg now. My compose comment had claimed the opposite.
+3. **nginx crash-looped on a duplicate `proxy_read_timeout`** (DEC-104) - `location /api/` set it
+   after including the shared params, which already had it.
+
+### Port 4787 is TAKEN ON THIS WINDOWS MACHINE
+
+`127.0.0.1:4787` is held by **Code.exe (VS Code), PID 4740**, so the verification ran on 4788.
+This is a dev-machine artifact, not the deploy target - but **check the VM before deploying**:
+
+```bash
+ss -ltnp | grep 4787     # must print nothing
+```
+
+The configured value is still 4787. Change `HRM_PUBLISH_PORT` in `prod.env` and the host-nginx
+upstream together if it turns out to be taken there too.
+
+### Machine notes
+
+`npm` on PATH in Git Bash resolves to a stray **npm 2.15.12** in the user's home directory, so
+`npm run <script>` fails with "missing script". Call the binaries directly:
+`node node_modules/typescript/bin/tsc`, `node node_modules/@nestjs/cli/bin/nest.js build`,
+`node node_modules/next/dist/bin/next build`. Git Bash also mangles a leading-slash env value, so
+`NEXT_PUBLIC_BASE_PATH=/panasa-hrm` needs `MSYS_NO_PATHCONV=1`. Neither affects Linux containers.
+
+### Exact next action for DEPLOY-01
+
+1. **On the VM: `ss -ltnp | grep 4787`**, then `cp infrastructure/compose/prod.env.template
+   infrastructure/compose/prod.env`, fill the three secrets, and run `./deploy.sh`. The stack is
+   proven to come up; what has never been exercised is `deploy.sh` itself end to end (the
+   verification drove compose directly, with a scratchpad env file).
+2. **A fresh deployment has no users.** Migrations apply schema only, so nobody can log in until
+   the database is seeded or a first administrator is created. See `DEPLOY.md` §4 - and note that
+   a real first-admin bootstrap does not exist yet.
+3. Add the host-nginx block from `DEPLOY.md` §3 and confirm
+   `https://ai.arttechgroup.com:7777/panasa-hrm/` renders.
+4. Then the go-live list in `DEPLOY.md` - **the restore drill is the one that gates everything**
+   (ADR-0013 amendment (b)).
+
+---
+
 ## Exact next action
 
 **Finish OR-19 — the authorization retrofit — starting with `apps/api/src/hr.ts`.**

@@ -1,3 +1,5 @@
+import { withBasePath } from '@/lib/base-path';
+
 /**
  * The ART mark.
  *
@@ -25,10 +27,11 @@
 export function ArtMark({ className = '', size = 28 }: { className?: string; size?: number }) {
   return (
     // A plain <img>: it is a local file of a known size, so the Image optimiser buys nothing and
-    // width/height are set explicitly to avoid layout shift.
+    // width/height are set explicitly to avoid layout shift. A raw src is root-absolute, so
+    // unlike next/image it does NOT pick up basePath on its own - hence withBasePath.
     // eslint-disable-next-line @next/next/no-img-element
     <img
-      src="/art-mark.png"
+      src={withBasePath('/art-mark.png')}
       alt=""
       aria-hidden="true"
       width={size}

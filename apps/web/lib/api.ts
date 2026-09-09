@@ -2,12 +2,21 @@
 
 import { useCallback, useEffect, useState } from 'react';
 
+import { withBasePath } from './base-path';
+
 /**
  * The single door to the API.
  *
- * Requests go to /api/* on the same origin; next.config.ts rewrites them to the NestJS app, so
- * the session cookie is same-origin and needs no CORS or credentials handling.
+ * Requests go to /api/* on the same origin, so the session cookie is same-origin and needs no
+ * CORS or credentials handling. What sits behind that path differs by environment and neither
+ * end of this module has to care:
+ *   * development - next.config.ts rewrites /api/* to the NestJS app on :4000;
+ *   * production  - the edge nginx routes /api/ straight to the API container.
+ *
+ * `apiUrl` applies the deployment's base path, because a bare fetch('/api/...') is
+ * root-absolute and Next's basePath does not touch it (see lib/base-path.ts).
  */
+const apiUrl = (path: string): string => withBasePath(`/api${path}`);
 
 export class ApiError extends Error {
   constructor(public readonly status: number, message: string) {
@@ -18,7 +27,7 @@ export class ApiError extends Error {
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   let res: Response;
   try {
-    res = await fetch(`/api${path}`, {
+    res = await fetch(apiUrl(path), {
       ...init,
       headers: { 'Content-Type': 'application/json', ...(init?.headers ?? {}) },
     });
@@ -50,7 +59,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 async function upload<T>(path: string, form: FormData): Promise<T> {
   let res: Response;
   try {
-    res = await fetch(`/api${path}`, { method: 'POST', body: form });
+    res = await fetch(apiUrl(path), { method: 'POST', body: form });
   } catch {
     throw new ApiError(0, 'Cannot reach the server. Is the API running on port 4000?');
   }
@@ -74,7 +83,7 @@ async function upload<T>(path: string, form: FormData): Promise<T> {
  * body, not a redirect.
  */
 async function download(path: string, fallbackName: string): Promise<void> {
-  const res = await fetch(`/api${path}`);
+  const res = await fetch(apiUrl(path));
   if (!res.ok) {
     let message = `Download failed (${res.status})`;
     try {
@@ -114,7 +123,7 @@ async function download(path: string, fallbackName: string): Promise<void> {
  * life of the document.
  */
 async function blob(path: string): Promise<{ url: string; contentType: string; revoke: () => void }> {
-  const res = await fetch(`/api${path}`);
+  const res = await fetch(apiUrl(path));
   if (!res.ok) {
     let message = `Could not open that file (${res.status})`;
     try {
