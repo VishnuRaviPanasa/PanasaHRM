@@ -112,7 +112,13 @@ $DC up -d
 #   3. the web app renders             -> /login returns 200
 #
 echo "==> Waiting for the stack"
-probe() { curl -s -o /dev/null -w '%{http_code}' --max-time 5 "http://127.0.0.1:${PORT}$1" || echo 000; }
+# curl already prints `000` as %{http_code} when it gets no response at all, so there is NO
+# `|| echo 000` fallback here: that appended a second value to curl's own, and a healthy probe
+# came back as "200000" - a deploy that reported failure while the stack was fine.
+probe() {
+  code="$(curl -s -o /dev/null -w '%{http_code}' --max-time 5 "http://127.0.0.1:${PORT}$1" 2>/dev/null)" || true
+  printf '%s' "${code:-000}"
+}
 
 edge=000 apiz=000 webz=000
 for _ in $(seq 1 45); do
@@ -126,9 +132,9 @@ done
 echo
 $DC ps
 echo
-printf '  edge  /healthz              %s  (expect 200)\n' "$edge"
-printf '  api   %-22s%s  (expect 401 - no session)\n' "${BASE}/api/auth/me" "$apiz"
-printf '  web   %-22s%s  (expect 200)\n' "${BASE}/login" "$webz"
+printf '  edge  /healthz                %s  (expect 200)\n' "$edge"
+printf '  api   %-24s%s  (expect 401 - no session)\n' "${BASE}/api/auth/me" "$apiz"
+printf '  web   %-24s%s  (expect 200)\n' "${BASE}/login" "$webz"
 echo
 
 if [ "$edge" = "200" ] && [ "$apiz" = "401" ] && [ "$webz" = "200" ]; then

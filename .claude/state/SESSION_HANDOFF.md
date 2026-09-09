@@ -164,6 +164,27 @@ ss -ltnp | grep 4788     # must print nothing
 If it is taken, change `HRM_PUBLISH_PORT` in `prod.env` **and** the `panasa_hrm_app` upstream in
 the host nginx together.
 
+### DEPLOY-03 - port moved to 4788, and `deploy.sh` finally run end to end
+
+`HRM_PUBLISH_PORT=4788` everywhere (DEC-109). The rationale text was corrected too: the old
+"4765/4766/4767 are taken" no longer explains the choice now that 4787 is out as well.
+
+**`./deploy.sh` was executed for real for the first time** - every earlier verification drove
+`docker compose` directly with hand-rolled probes. That immediately found **DEC-110**: the probe's
+`|| echo 000` fallback appended to curl's own `000`, so a healthy `200` arrived as `200000`, never
+matched, and the script exited 1 with all six containers healthy and serving. Fixed, plus the
+report columns were a character too narrow.
+
+Verified after the change, from a clean volume:
+
+| Check | Result |
+|---|---|
+| `./deploy.sh --no-pull` | **exit 0** - "Deploy complete. local: http://127.0.0.1:4788/panasa-hrm/" |
+| Preflight on the blank template | names exactly the five empty secrets, refuses before pull or build |
+| Probes | `200 / 401 / 200` |
+| All six containers | healthy, `127.0.0.1:4788->80/tcp` |
+| Teardown | volumes and `prod.env` removed |
+
 ### Machine notes
 
 `npm` on PATH in Git Bash resolves to a stray **npm 2.15.12** in the user's home directory, so
