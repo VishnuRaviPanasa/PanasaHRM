@@ -139,13 +139,27 @@ upstream panasa_hrm_app {
 }
 
 # --- inside the `server { listen 7777 ssl ... }` block ---
-location = /panasa-hrm {
-    return 301 /panasa-hrm/;
-}
+#
+# NOTE THE MISSING TRAILING SLASH on the location, and the absence of a slash-adding
+# redirect. Both are load-bearing, and an earlier version of this runbook got it wrong.
+#
+# The obvious way to mount an app under a path - `location = /panasa-hrm { return 301
+# /panasa-hrm/; }` in front of a `location /panasa-hrm/` - produces an infinite redirect
+# loop here, because Next normalises the OTHER way: it 308s `/panasa-hrm/` to
+# `/panasa-hrm`. The host adds the slash, Next takes it off, forever, and the browser
+# gives up with ERR_TOO_MANY_REDIRECTS. Reproduced against a real basePath build; see
+# docs/governance/decisions.md, DEC-111.
+#
+# A prefix location with no trailing slash matches BOTH `/panasa-hrm` and
+# `/panasa-hrm/...`, so nothing needs redirecting and Next settles the canonical form
+# itself, in one hop.
 
-location /panasa-hrm/ {
-    # NOTE: NO rewrite, unlike /hr-agent/. Next is built with basePath=/panasa-hrm and serves
-    # every route and asset under that prefix already; stripping it here would 404 the app.
+location /panasa-hrm {
+    # NO rewrite, unlike /hr-agent/, and NO trailing slash on proxy_pass. Next is built with
+    # basePath=/panasa-hrm and serves every route and asset under that prefix already.
+    # A trailing slash here (`proxy_pass http://panasa_hrm_app/;`) strips the prefix and
+    # every request 404s - that is the other failure mode, and it is NOT a redirect loop,
+    # so the two are easy to tell apart from the status codes alone.
     proxy_pass http://panasa_hrm_app;
 
     proxy_http_version 1.1;
@@ -162,6 +176,31 @@ location /panasa-hrm/ {
 ```bash
 sudo nginx -t && sudo systemctl reload nginx
 ```
+
+### If the browser says ERR_TOO_MANY_REDIRECTS
+
+The stack itself emits exactly ONE redirect in its whole surface - Next normalising
+`/panasa-hrm/` to `/panasa-hrm` (308). There is no middleware, no `redirects` in
+`next.config.ts`, no `trailingSlash`, and the edge nginx issues none. **So a loop always means
+the host nginx is redirecting too**, and the two cancel out. Almost always it is a slash-adding
+`return 301` in front of a `location /panasa-hrm/`; delete it and drop the location's trailing
+slash, as above.
+
+Ask for the chain rather than guessing - this prints every hop:
+
+```bash
+curl -sS -o /dev/null -L --max-redirs 5 \
+  -w '%{num_redirects} hops, final %{http_code}\n' \
+  https://ai.arttechgroup.com:7777/panasa-hrm/
+
+# 1 hops, final 200  -> correct. That one hop is Next dropping the trailing slash.
+# 5 hops, final 30x  -> the host nginx is redirecting as well; see above.
+# 0 hops, final 404  -> the opposite fault: proxy_pass has a trailing slash and is
+#                       stripping the prefix before the container sees it.
+```
+
+`curl -sSI` on each hop in turn shows which layer emitted it: nginx answers with
+`Server: nginx` and no `X-Powered-By`, Next's own 308 carries neither.
 
 ### Check the port is free on the host first
 
