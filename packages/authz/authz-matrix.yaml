@@ -27,7 +27,7 @@
 # multi-valued - so a cell describes the role in isolation and the deny-overrides are what stop
 # a second role widening the first.
 
-roles: [employee, manager, hr_admin, hr_ops, finance, auditor]
+roles: [employee, manager, hr_admin, hr_ops, finance, auditor, delivery_head]
 
 # -----------------------------------------------------------------------------
 # The named negative cases from ai/context/rbac-rules.md.
@@ -230,28 +230,101 @@ actions:
   # ---- identity ---------------------------------------------------------
   identity.session.read:
     graph: self
-    cells: { employee: conditional, manager: conditional, hr_admin: conditional, hr_ops: deny, finance: deny, auditor: deny }
+    cells: { employee: conditional, manager: conditional, hr_admin: conditional, hr_ops: deny, finance: deny, auditor: deny, delivery_head: deny }
 
   identity.role.grant:
     graph: organisation
     deny_overrides: [is_break_glass]
-    cells: { employee: deny, manager: deny, hr_admin: allow, hr_ops: deny, finance: deny, auditor: deny }
+    cells: { employee: deny, manager: deny, hr_admin: allow, hr_ops: deny, finance: deny, auditor: deny, delivery_head: deny }
 
   identity.role.revoke:
     graph: organisation
     deny_overrides: [is_break_glass]
-    cells: { employee: deny, manager: deny, hr_admin: allow, hr_ops: deny, finance: deny, auditor: deny }
+    cells: { employee: deny, manager: deny, hr_admin: allow, hr_ops: deny, finance: deny, auditor: deny, delivery_head: deny }
 
   identity.link.create:
     graph: organisation
     note: ADR-0009 - a federated identity link is an administrative act, never created by a login
     deny_overrides: [is_break_glass]
-    cells: { employee: deny, manager: deny, hr_admin: allow, hr_ops: deny, finance: deny, auditor: deny }
+    cells: { employee: deny, manager: deny, hr_admin: allow, hr_ops: deny, finance: deny, auditor: deny, delivery_head: deny }
 
   identity.session.revoke:
     graph: organisation
     deny_overrides: [is_break_glass]
-    cells: { employee: deny, manager: deny, hr_admin: allow, hr_ops: deny, finance: deny, auditor: deny }
+    cells: { employee: deny, manager: deny, hr_admin: allow, hr_ops: deny, finance: deny, auditor: deny, delivery_head: deny }
+
+  identity.account.create:
+    graph: organisation
+    note: >
+      Creating the login for an employee who has none. HR-admin only, and NOT hr_ops - handing
+      somebody a way into an account is the same privilege as granting them a role, arriving by a
+      different door. Break-glass is denied because a sealed credential exists to restore access
+      during an outage, not to mint new access.
+    deny_overrides: [is_break_glass]
+    cells: { employee: deny, manager: deny, hr_admin: allow, hr_ops: deny, finance: deny, auditor: deny, delivery_head: deny }
+
+  identity.account.reissue:
+    graph: organisation
+    note: >
+      Re-minting the one-time activation token when the previous one was lost or expired. Separate
+      from account.create so it can be tightened independently. This is NOT a password reset -
+      migration 0029 refuses an activation token for any account that already holds a credential,
+      so the distinction is a database rail rather than a convention.
+    deny_overrides: [is_break_glass]
+    cells: { employee: deny, manager: deny, hr_admin: allow, hr_ops: deny, finance: deny, auditor: deny, delivery_head: deny }
+
+  # ---- onboarding -------------------------------------------------------
+  #
+  # The approval chain that ends in an offer letter. Four actions rather than one, because they
+  # are four different acts performed by three different people, and a single
+  # `onboarding.annexure.decide` would mean the finance head and the delivery head hold the same
+  # permission and only the application remembers which is which (the DEC-115 argument).
+  #
+  # THE SUBJECT IS DENIED THE READ. Somebody being hired must not see their own package while it
+  # is under review - the figures change, and a rejected annexure is a conversation HR has not had
+  # yet. They see it when the offer letter is issued, which is a document, not this.
+
+  onboarding.annexure.read:
+    graph: organisation
+    note: >
+      Whoever has to act on it. hr_admin prepares, finance and the delivery head decide. Deliberately
+      NOT the subject, and not their line manager - a package under review is not team information.
+    cells: { employee: deny, manager: deny, hr_admin: allow, hr_ops: deny, finance: allow, auditor: allow, delivery_head: allow }
+
+  onboarding.annexure.write:
+    graph: organisation
+    note: >
+      Create, edit and submit. HR only. Editing is refused by the database once the annexure has
+      left draft (0032 trg_sac_draft_only), so this action governs WHO may prepare one, not when.
+    deny_overrides: [is_break_glass]
+    cells: { employee: deny, manager: deny, hr_admin: allow, hr_ops: deny, finance: deny, auditor: deny, delivery_head: deny }
+
+  onboarding.annexure.approve_finance:
+    graph: organisation
+    note: >
+      The finance head's sign-off, and theirs alone - NOT hr_admin, who prepared it. Separation of
+      duty is the entire point of the chain; an HR admin who could also approve financially would
+      make the step decorative. The database backs this from the other side: nobody may approve
+      their own package (ck_sae_no_self_approval).
+    deny_overrides: [is_break_glass]
+    cells: { employee: deny, manager: deny, hr_admin: deny, hr_ops: deny, finance: allow, auditor: deny, delivery_head: deny }
+
+  onboarding.annexure.approve_delivery:
+    graph: organisation
+    note: >
+      The delivery head's sign-off. Separate from the finance one so either can be re-scoped later
+      without touching the other, and so the matrix says plainly that finance cannot stand in for
+      delivery.
+    deny_overrides: [is_break_glass]
+    cells: { employee: deny, manager: deny, hr_admin: deny, hr_ops: deny, finance: deny, auditor: deny, delivery_head: allow }
+
+  onboarding.offer.manage:
+    graph: organisation
+    note: >
+      Issuing the offer letter once both approvals are in, and recording whether it was accepted or
+      declined. HR only - the approvers decide the package, HR runs the process.
+    deny_overrides: [is_break_glass]
+    cells: { employee: deny, manager: deny, hr_admin: allow, hr_ops: deny, finance: deny, auditor: deny, delivery_head: deny }
 
   # ---- people -----------------------------------------------------------
   people.employee.read:
@@ -260,80 +333,80 @@ actions:
       The directory is PUBLIC_INTERNAL, so the ROW scope is open and the FIELD MASK is what keeps
       personal data out of it. Two separate concerns - conflating them is how either the
       directory breaks or the address leaks.
-    cells: { employee: allow, manager: allow, hr_admin: allow, hr_ops: allow, finance: deny, auditor: deny }
+    cells: { employee: allow, manager: allow, hr_admin: allow, hr_ops: allow, finance: deny, auditor: deny, delivery_head: deny }
 
   people.employee.list:
     graph: reporting
-    cells: { employee: allow, manager: allow, hr_admin: allow, hr_ops: allow, finance: deny, auditor: deny }
+    cells: { employee: allow, manager: allow, hr_admin: allow, hr_ops: allow, finance: deny, auditor: deny, delivery_head: deny }
 
   people.employee.personal.read:
     graph: reporting
     note: Manager reach is DIRECT REPORTS ONLY here, never the subtree (rbac-rules asymmetry)
     deny_overrides: [is_ancestor_of_actor, is_break_glass]
-    cells: { employee: conditional, manager: conditional, hr_admin: conditional, hr_ops: conditional, finance: deny, auditor: deny }
+    cells: { employee: conditional, manager: conditional, hr_admin: conditional, hr_ops: conditional, finance: deny, auditor: deny, delivery_head: deny }
 
   people.employee.create:
     graph: organisation
-    cells: { employee: deny, manager: deny, hr_admin: allow, hr_ops: allow, finance: deny, auditor: deny }
+    cells: { employee: deny, manager: deny, hr_admin: allow, hr_ops: allow, finance: deny, auditor: deny, delivery_head: deny }
 
   people.employee.update:
     graph: reporting
     deny_overrides: [is_ancestor_of_actor]
-    cells: { employee: conditional, manager: conditional, hr_admin: conditional, hr_ops: conditional, finance: deny, auditor: deny }
+    cells: { employee: conditional, manager: conditional, hr_admin: conditional, hr_ops: conditional, finance: deny, auditor: deny, delivery_head: deny }
 
   people.lifecycle.read:
     graph: reporting
     deny_overrides: [is_ancestor_of_actor]
-    cells: { employee: conditional, manager: conditional, hr_admin: conditional, hr_ops: conditional, finance: deny, auditor: deny }
+    cells: { employee: conditional, manager: conditional, hr_admin: conditional, hr_ops: conditional, finance: deny, auditor: deny, delivery_head: deny }
 
   people.lifecycle.transition:
     graph: organisation
     note: HR act, not a manager's - a promotion recorded by the promoting manager has no independent check
     deny_overrides: [is_self, is_break_glass]
-    cells: { employee: deny, manager: deny, hr_admin: conditional, hr_ops: conditional, finance: deny, auditor: deny }
+    cells: { employee: deny, manager: deny, hr_admin: conditional, hr_ops: conditional, finance: deny, auditor: deny, delivery_head: deny }
 
   people.assignment.change:
     graph: organisation
     deny_overrides: [is_self, is_break_glass]
-    cells: { employee: deny, manager: deny, hr_admin: conditional, hr_ops: conditional, finance: deny, auditor: deny }
+    cells: { employee: deny, manager: deny, hr_admin: conditional, hr_ops: conditional, finance: deny, auditor: deny, delivery_head: deny }
 
   # ---- leave ------------------------------------------------------------
   leave.balance.read:
     graph: reporting
-    cells: { employee: conditional, manager: conditional, hr_admin: allow, hr_ops: allow, finance: deny, auditor: deny }
+    cells: { employee: conditional, manager: conditional, hr_admin: allow, hr_ops: allow, finance: deny, auditor: deny, delivery_head: deny }
 
   leave.request.read:
     graph: reporting
-    cells: { employee: conditional, manager: conditional, hr_admin: allow, hr_ops: allow, finance: deny, auditor: deny }
+    cells: { employee: conditional, manager: conditional, hr_admin: allow, hr_ops: allow, finance: deny, auditor: deny, delivery_head: deny }
 
   leave.request.create:
     graph: self
-    cells: { employee: conditional, manager: conditional, hr_admin: conditional, hr_ops: deny, finance: deny, auditor: deny }
+    cells: { employee: conditional, manager: conditional, hr_admin: conditional, hr_ops: deny, finance: deny, auditor: deny, delivery_head: deny }
 
   leave.request.cancel:
     graph: self
-    cells: { employee: conditional, manager: conditional, hr_admin: conditional, hr_ops: deny, finance: deny, auditor: deny }
+    cells: { employee: conditional, manager: conditional, hr_admin: conditional, hr_ops: deny, finance: deny, auditor: deny, delivery_head: deny }
 
   leave.request.approve:
     graph: reporting
     note: Also enforced by CHECK in the database - this is the second layer, not the only one
     deny_overrides: [is_self, is_break_glass]
-    cells: { employee: deny, manager: conditional, hr_admin: conditional, hr_ops: conditional, finance: deny, auditor: deny }
+    cells: { employee: deny, manager: conditional, hr_admin: conditional, hr_ops: conditional, finance: deny, auditor: deny, delivery_head: deny }
 
   # ---- attendance -------------------------------------------------------
   attendance.day.read:
     graph: reporting
     note: Whole SUBTREE for a manager - operational data, unlike personal detail
-    cells: { employee: conditional, manager: conditional, hr_admin: allow, hr_ops: allow, finance: deny, auditor: deny }
+    cells: { employee: conditional, manager: conditional, hr_admin: allow, hr_ops: allow, finance: deny, auditor: deny, delivery_head: deny }
 
   attendance.punch.read:
     graph: reporting
     note: Punches carry SENSITIVE location data (data-inventory.md)
-    cells: { employee: conditional, manager: conditional, hr_admin: allow, hr_ops: allow, finance: deny, auditor: deny }
+    cells: { employee: conditional, manager: conditional, hr_admin: allow, hr_ops: allow, finance: deny, auditor: deny, delivery_head: deny }
 
   attendance.punch.create:
     graph: self
-    cells: { employee: conditional, manager: conditional, hr_admin: conditional, hr_ops: deny, finance: deny, auditor: deny }
+    cells: { employee: conditional, manager: conditional, hr_admin: conditional, hr_ops: deny, finance: deny, auditor: deny, delivery_head: deny }
 
   # ---- work -------------------------------------------------------------
   # Written from the requirement, not from the policy.
@@ -345,17 +418,17 @@ actions:
   # compensation rule rbac-rules.md states explicitly.
   payroll.payslip.read:
     graph: self
-    cells: { employee: conditional, manager: conditional, hr_admin: conditional, hr_ops: deny, finance: conditional, auditor: deny }
+    cells: { employee: conditional, manager: conditional, hr_admin: conditional, hr_ops: deny, finance: conditional, auditor: deny, delivery_head: deny }
 
   # Managing is hr_admin only, and conditional even then: not for your own chain of command, and
   # never for yourself (no self-issue).
   payroll.payslip.manage:
     graph: organisation
-    cells: { employee: deny, manager: deny, hr_admin: conditional, hr_ops: deny, finance: deny, auditor: deny }
+    cells: { employee: deny, manager: deny, hr_admin: conditional, hr_ops: deny, finance: deny, auditor: deny, delivery_head: deny }
 
   work.log.read:
     graph: reporting
-    cells: { employee: conditional, manager: conditional, hr_admin: allow, hr_ops: allow, finance: deny, auditor: deny }
+    cells: { employee: conditional, manager: conditional, hr_admin: allow, hr_ops: allow, finance: deny, auditor: deny, delivery_head: deny }
 
   # Written from the requirement, not copied from the policy: a task assigned to a person is a
   # fact about that person, so it follows the same rule as their work log - self, subtree for a
@@ -363,11 +436,11 @@ actions:
   # finance and auditor hold no work grant at all.
   work.task.read:
     graph: reporting
-    cells: { employee: conditional, manager: conditional, hr_admin: allow, hr_ops: allow, finance: deny, auditor: deny }
+    cells: { employee: conditional, manager: conditional, hr_admin: allow, hr_ops: allow, finance: deny, auditor: deny, delivery_head: deny }
 
   work.log.write:
     graph: self
-    cells: { employee: conditional, manager: conditional, hr_admin: conditional, hr_ops: deny, finance: deny, auditor: deny }
+    cells: { employee: conditional, manager: conditional, hr_admin: conditional, hr_ops: deny, finance: deny, auditor: deny, delivery_head: deny }
 
   # HR recording effort for somebody else. `work.log.write` above is graph `self`, so hr_admin's
   # cell there means "HR's own work log" - which is why HR could not enter a log for an employee.
@@ -375,47 +448,47 @@ actions:
   # approval of something you wrote yourself is not an approval.
   work.log.write_for:
     graph: organisation
-    cells: { employee: deny, manager: deny, hr_admin: allow, hr_ops: deny, finance: deny, auditor: deny }
+    cells: { employee: deny, manager: deny, hr_admin: allow, hr_ops: deny, finance: deny, auditor: deny, delivery_head: deny }
 
   work.timesheet.read:
     graph: reporting
-    cells: { employee: conditional, manager: conditional, hr_admin: allow, hr_ops: allow, finance: deny, auditor: deny }
+    cells: { employee: conditional, manager: conditional, hr_admin: allow, hr_ops: allow, finance: deny, auditor: deny, delivery_head: deny }
 
   work.timesheet.submit:
     graph: self
-    cells: { employee: conditional, manager: conditional, hr_admin: conditional, hr_ops: deny, finance: deny, auditor: deny }
+    cells: { employee: conditional, manager: conditional, hr_admin: conditional, hr_ops: deny, finance: deny, auditor: deny, delivery_head: deny }
 
   work.timesheet.approve:
     graph: reporting
     deny_overrides: [is_self, is_break_glass]
-    cells: { employee: deny, manager: conditional, hr_admin: conditional, hr_ops: deny, finance: deny, auditor: deny }
+    cells: { employee: deny, manager: conditional, hr_admin: conditional, hr_ops: deny, finance: deny, auditor: deny, delivery_head: deny }
 
   work.team_effort.read:
     graph: reporting
     note: Effort of MY reports, aggregated. Does NOT widen to their projects.
-    cells: { employee: deny, manager: allow, hr_admin: allow, hr_ops: allow, finance: deny, auditor: deny }
+    cells: { employee: deny, manager: allow, hr_admin: allow, hr_ops: allow, finance: deny, auditor: deny, delivery_head: deny }
 
   work.project_effort.read:
     graph: project
     note: >
       PROJECT graph. Requires lead/project_manager membership, not a reporting line. This is the
       cell that pins "reporting scope does not widen".
-    cells: { employee: conditional, manager: conditional, hr_admin: allow, hr_ops: deny, finance: deny, auditor: deny }
+    cells: { employee: conditional, manager: conditional, hr_admin: allow, hr_ops: deny, finance: deny, auditor: deny, delivery_head: deny }
 
   work.project.read:
     graph: project
-    cells: { employee: conditional, manager: conditional, hr_admin: allow, hr_ops: allow, finance: deny, auditor: deny }
+    cells: { employee: conditional, manager: conditional, hr_admin: allow, hr_ops: allow, finance: deny, auditor: deny, delivery_head: deny }
 
   work.project.manage:
     graph: organisation
-    cells: { employee: deny, manager: conditional, hr_admin: allow, hr_ops: deny, finance: deny, auditor: deny }
+    cells: { employee: deny, manager: conditional, hr_admin: allow, hr_ops: deny, finance: deny, auditor: deny, delivery_head: deny }
 
   # The task and sub-task master list. Narrower than work.project.manage above, which also admits
   # a project lead: retiring a task changes what every member of that project may log effort
   # against, so it is an HR act. hr_ops is deny - it manages people records, not work structure.
   work.task.manage:
     graph: organisation
-    cells: { employee: deny, manager: deny, hr_admin: allow, hr_ops: deny, finance: deny, auditor: deny }
+    cells: { employee: deny, manager: deny, hr_admin: allow, hr_ops: deny, finance: deny, auditor: deny, delivery_head: deny }
 
   # ---- documents --------------------------------------------------------
   # THE UNUSUAL ONE: a line manager gets NOTHING here, unlike every other reporting-graph
@@ -429,12 +502,12 @@ actions:
   documents.document.list:
     graph: reporting
     deny_overrides: [is_break_glass]
-    cells: { employee: conditional, manager: conditional, hr_admin: allow, hr_ops: conditional, finance: deny, auditor: deny }
+    cells: { employee: conditional, manager: conditional, hr_admin: allow, hr_ops: conditional, finance: deny, auditor: deny, delivery_head: deny }
 
   documents.document.read:
     graph: reporting
     deny_overrides: [is_break_glass]
-    cells: { employee: conditional, manager: conditional, hr_admin: allow, hr_ops: conditional, finance: deny, auditor: deny }
+    cells: { employee: conditional, manager: conditional, hr_admin: allow, hr_ops: conditional, finance: deny, auditor: deny, delivery_head: deny }
 
   documents.document.download:
     graph: reporting
@@ -443,18 +516,18 @@ actions:
       reads where the disclosure is field values a mask already governs - so the individual
       access has to be recorded for a bulk export to be noticeable at all.
     deny_overrides: [is_break_glass]
-    cells: { employee: conditional, manager: conditional, hr_admin: allow, hr_ops: conditional, finance: deny, auditor: deny }
+    cells: { employee: conditional, manager: conditional, hr_admin: allow, hr_ops: conditional, finance: deny, auditor: deny, delivery_head: deny }
 
   documents.document.upload:
     graph: reporting
     deny_overrides: [is_break_glass]
-    cells: { employee: conditional, manager: conditional, hr_admin: allow, hr_ops: allow, finance: deny, auditor: deny }
+    cells: { employee: conditional, manager: conditional, hr_admin: allow, hr_ops: allow, finance: deny, auditor: deny, delivery_head: deny }
 
   documents.document.withdraw:
     graph: organisation
     note: An employee must not be able to withdraw a document HR relies on.
     deny_overrides: [is_break_glass]
-    cells: { employee: deny, manager: deny, hr_admin: allow, hr_ops: allow, finance: deny, auditor: deny }
+    cells: { employee: deny, manager: deny, hr_admin: allow, hr_ops: allow, finance: deny, auditor: deny, delivery_head: deny }
 
   documents.document.scan:
     graph: organisation
@@ -462,7 +535,7 @@ actions:
       The uploader must never declare their own upload clean - that would make the quarantine
       gate self-certifying.
     deny_overrides: [is_break_glass]
-    cells: { employee: deny, manager: deny, hr_admin: allow, hr_ops: allow, finance: deny, auditor: deny }
+    cells: { employee: deny, manager: deny, hr_admin: allow, hr_ops: allow, finance: deny, auditor: deny, delivery_head: deny }
 
   # ---- organization -----------------------------------------------------
   # NOTE the contrast with `config.*` below. ADR-0005(a) makes reading a POLICY row a privilege
@@ -471,11 +544,11 @@ actions:
   # withholding - the same division of labour as people.employee.read.
   org.unit.read:
     graph: organisation
-    cells: { employee: allow, manager: allow, hr_admin: allow, hr_ops: allow, finance: allow, auditor: allow }
+    cells: { employee: allow, manager: allow, hr_admin: allow, hr_ops: allow, finance: allow, auditor: allow, delivery_head: allow }
 
   org.team.read:
     graph: organisation
-    cells: { employee: allow, manager: allow, hr_admin: allow, hr_ops: allow, finance: allow, auditor: allow }
+    cells: { employee: allow, manager: allow, hr_admin: allow, hr_ops: allow, finance: allow, auditor: allow, delivery_head: allow }
 
   # Same cells as org.unit.manage and a SEPARATE action on purpose: retiring a designation closes
   # it to every future hire in the organisation, which is a different blast radius from
@@ -483,7 +556,7 @@ actions:
   org.designation.manage:
     graph: organisation
     deny_overrides: [is_break_glass]
-    cells: { employee: deny, manager: deny, hr_admin: allow, hr_ops: allow, finance: deny, auditor: deny }
+    cells: { employee: deny, manager: deny, hr_admin: allow, hr_ops: allow, finance: deny, auditor: deny, delivery_head: deny }
 
   org.unit.manage:
     graph: organisation
@@ -492,12 +565,12 @@ actions:
       no independent check anywhere - the same reasoning that keeps lifecycle transitions out of
       a manager's hands.
     deny_overrides: [is_break_glass]
-    cells: { employee: deny, manager: deny, hr_admin: allow, hr_ops: allow, finance: deny, auditor: deny }
+    cells: { employee: deny, manager: deny, hr_admin: allow, hr_ops: allow, finance: deny, auditor: deny, delivery_head: deny }
 
   org.team.manage:
     graph: organisation
     deny_overrides: [is_break_glass]
-    cells: { employee: deny, manager: deny, hr_admin: allow, hr_ops: allow, finance: deny, auditor: deny }
+    cells: { employee: deny, manager: deny, hr_admin: allow, hr_ops: allow, finance: deny, auditor: deny, delivery_head: deny }
 
   org.team.member.manage:
     graph: organisation
@@ -506,7 +579,7 @@ actions:
       so there is no principled way to let "the team's lead" manage it without inventing a third
       graph, which ADR-0005 would have to sanction.
     deny_overrides: [is_break_glass]
-    cells: { employee: deny, manager: deny, hr_admin: allow, hr_ops: allow, finance: deny, auditor: deny }
+    cells: { employee: deny, manager: deny, hr_admin: allow, hr_ops: allow, finance: deny, auditor: deny, delivery_head: deny }
 
   # ---- configuration ----------------------------------------------------
   config.policy.read:
@@ -515,27 +588,27 @@ actions:
       ADR-0005(a) - a policy row is a historical derivation input and reading one is a privilege.
       There is no implicit "everyone can read configuration". This governs EXPOSING a row through
       an endpoint; the leave engine deriving an entitlement internally is not an actor read.
-    cells: { employee: deny, manager: deny, hr_admin: allow, hr_ops: allow, finance: deny, auditor: allow }
+    cells: { employee: deny, manager: deny, hr_admin: allow, hr_ops: allow, finance: deny, auditor: allow, delivery_head: deny }
 
   config.setting.read:
     graph: organisation
-    cells: { employee: deny, manager: deny, hr_admin: allow, hr_ops: allow, finance: deny, auditor: allow }
+    cells: { employee: deny, manager: deny, hr_admin: allow, hr_ops: allow, finance: deny, auditor: allow, delivery_head: deny }
 
   config.policy.write:
     graph: organisation
     note: Writing policy changes what every historical date resolves to, for everybody
     deny_overrides: [is_break_glass]
-    cells: { employee: deny, manager: deny, hr_admin: allow, hr_ops: deny, finance: deny, auditor: deny }
+    cells: { employee: deny, manager: deny, hr_admin: allow, hr_ops: deny, finance: deny, auditor: deny, delivery_head: deny }
 
   config.setting.write:
     graph: organisation
     deny_overrides: [is_break_glass]
-    cells: { employee: deny, manager: deny, hr_admin: allow, hr_ops: deny, finance: deny, auditor: deny }
+    cells: { employee: deny, manager: deny, hr_admin: allow, hr_ops: deny, finance: deny, auditor: deny, delivery_head: deny }
 
   # ---- audit ------------------------------------------------------------
   audit.event.read:
     graph: organisation
-    cells: { employee: deny, manager: deny, hr_admin: allow, hr_ops: deny, finance: deny, auditor: allow }
+    cells: { employee: deny, manager: deny, hr_admin: allow, hr_ops: deny, finance: deny, auditor: allow, delivery_head: deny }
 
 # -----------------------------------------------------------------------------
 # Known divergences from ai/context/rbac-rules.md, stated rather than silently resolved

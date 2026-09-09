@@ -12,17 +12,24 @@
  * package compares a role at all (Must-Know Rule 1).
  */
 
-/** The roles `user_role` may grant. Mirrors ck_user_role_value in migration 0016. */
+/**
+ * The roles `user_role` may grant. Mirrors ck_user_role_value, widened to seven by migration 0031.
+ *
+ * `finance` is the FINANCE HEAD and `delivery_head` the delivery head in the onboarding approval
+ * chain. Both are flat roles rather than a position in a scope graph, because there is one of each
+ * on one site - a hierarchy nobody has would be an invented requirement (0031's header).
+ */
 export type Role =
   | 'employee'
   | 'manager'
   | 'hr_admin'
   | 'hr_ops'
   | 'finance'
-  | 'auditor';
+  | 'auditor'
+  | 'delivery_head';
 
 export const ALL_ROLES: readonly Role[] = [
-  'employee', 'manager', 'hr_admin', 'hr_ops', 'finance', 'auditor',
+  'employee', 'manager', 'hr_admin', 'hr_ops', 'finance', 'auditor', 'delivery_head',
 ] as const;
 
 /**
@@ -89,6 +96,7 @@ export type ResourceType =
   | 'team'
   | 'employee_document'
   | 'payslip'
+  | 'salary_annexure'
   | 'org_config'
   | 'audit_event'
   | 'identity';

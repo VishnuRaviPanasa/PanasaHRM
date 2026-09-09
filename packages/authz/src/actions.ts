@@ -22,6 +22,17 @@ export const ACTIONS = {
   'identity.role.revoke':         { resource: 'identity',       graph: 'organisation' },
   'identity.link.create':         { resource: 'identity',       graph: 'organisation' },
   'identity.session.revoke':      { resource: 'identity',       graph: 'organisation' },
+  'identity.account.create':      { resource: 'identity',       graph: 'organisation' },
+  'identity.account.reissue':     { resource: 'identity',       graph: 'organisation' },
+
+  // ---- onboarding ---------------------------------------------------------
+  'onboarding.annexure.read':     { resource: 'salary_annexure', graph: 'organisation' },
+  'onboarding.annexure.write':    { resource: 'salary_annexure', graph: 'organisation' },
+  'onboarding.annexure.approve_finance':
+    { resource: 'salary_annexure', graph: 'organisation' },
+  'onboarding.annexure.approve_delivery':
+    { resource: 'salary_annexure', graph: 'organisation' },
+  'onboarding.offer.manage':      { resource: 'salary_annexure', graph: 'organisation' },
 
   // ---- people -------------------------------------------------------------
   'people.employee.read':         { resource: 'employee',       graph: 'reporting' },

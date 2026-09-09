@@ -86,8 +86,20 @@ definePolicy({
 // Granting and revoking privilege is HR-admin only, and a break-glass account may not do it.
 // A break-glass credential exists to restore access during an outage; letting it hand out roles
 // would make it a privilege-escalation primitive that bypasses conditional access by design.
+//
+// `account.create` and `account.reissue` join that set rather than sitting anywhere softer,
+// because both hand a named person a way into an account - which is the same privilege as
+// granting a role, arriving by a different door. `reissue` is SEPARATE from `create` on the
+// DEC-115 principle: re-minting entry to an account that already exists is a distinct act from
+// provisioning a new one, and a matrix row that can be tightened later is worth more than one
+// broad action nobody can narrow without breaking callers.
+//
+// Neither is a password RESET, which belongs to the account holder and is proven by something
+// they have. Migration 0029 enforces that distinction in the database - an activation token
+// cannot be issued for an account that already has a credential - so it does not depend on this
+// policy being read correctly.
 for (const action of ['identity.role.grant', 'identity.role.revoke', 'identity.link.create',
-  'identity.session.revoke'] as const) {
+  'identity.session.revoke', 'identity.account.create', 'identity.account.reissue'] as const) {
   definePolicy({
     action,
     denyOverrides: [isBreakGlassActor],
@@ -95,6 +107,62 @@ for (const action of ['identity.role.grant', 'identity.role.revoke', 'identity.l
     scope: (ctx) => orgRows(ctx, ['hr_admin']),
   });
 }
+
+// ---------------------------------------------------------------------------
+// onboarding - the approval chain that ends in an offer letter
+//
+// SEPARATION OF DUTY IS THE WHOLE POINT, so these are four actions and not one. HR prepares the
+// annexure, the finance head approves the money, the delivery head approves the hire, HR issues
+// the letter. Collapsing them into a single `decide` would mean the two approvers hold the same
+// permission and only the application layer remembers which is which - which is exactly the kind
+// of decision Must-Know Rule 1 says must not live outside this package.
+//
+// `hr_admin` is DENIED both approvals on purpose. They are the ones who typed the figures; an
+// approval by the author is not an approval. The database says the same thing from the other side
+// (`ck_sae_no_self_approval`), so neither layer is the only thing standing between a package and
+// its own author signing it off.
+//
+// Break-glass is denied every write here. A sealed credential exists to restore access during an
+// outage, not to approve somebody's salary.
+
+definePolicy({
+  action: 'onboarding.annexure.read',
+  allow: [
+    { role: 'hr_admin', when: always },
+    { role: 'finance', when: always, obligations: [{ kind: 'audit_read', purpose: 'onboarding_approval' }] },
+    { role: 'delivery_head', when: always, obligations: [{ kind: 'audit_read', purpose: 'onboarding_approval' }] },
+    { role: 'auditor', when: always, obligations: [{ kind: 'audit_read', purpose: 'audit' }] },
+  ],
+  scope: (ctx) => orgRows(ctx, ['hr_admin', 'finance', 'delivery_head', 'auditor']),
+});
+
+definePolicy({
+  action: 'onboarding.annexure.write',
+  denyOverrides: [isBreakGlassActor],
+  allow: [{ role: 'hr_admin', when: always }],
+  scope: (ctx) => orgRows(ctx, ['hr_admin']),
+});
+
+definePolicy({
+  action: 'onboarding.annexure.approve_finance',
+  denyOverrides: [isBreakGlassActor],
+  allow: [{ role: 'finance', when: always }],
+  scope: (ctx) => orgRows(ctx, ['finance']),
+});
+
+definePolicy({
+  action: 'onboarding.annexure.approve_delivery',
+  denyOverrides: [isBreakGlassActor],
+  allow: [{ role: 'delivery_head', when: always }],
+  scope: (ctx) => orgRows(ctx, ['delivery_head']),
+});
+
+definePolicy({
+  action: 'onboarding.offer.manage',
+  denyOverrides: [isBreakGlassActor],
+  allow: [{ role: 'hr_admin', when: always }],
+  scope: (ctx) => orgRows(ctx, ['hr_admin']),
+});
 
 // ---------------------------------------------------------------------------
 // people
@@ -649,6 +717,7 @@ for (const action of ['org.unit.read', 'org.team.read'] as const) {
       { role: 'hr_ops', when: always },
       { role: 'finance', when: always },
       { role: 'auditor', when: always },
+      { role: 'delivery_head', when: always },
     ],
     scope: () => ALLOW_ALL,
   });

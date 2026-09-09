@@ -28,7 +28,7 @@ const R = (
 ): FieldRule => ({ cls, roles, self, neverInList });
 
 /** Everyone authenticated may see it. */
-const PUBLIC = (): FieldRule => R('PUBLIC_INTERNAL', ['employee', 'manager', 'hr_admin', 'hr_ops', 'finance', 'auditor'], true);
+const PUBLIC = (): FieldRule => R('PUBLIC_INTERNAL', ['employee', 'manager', 'hr_admin', 'hr_ops', 'finance', 'auditor', 'delivery_head'], true);
 /** The subject, plus HR. */
 const HR_AND_SELF = (cls: DataClass, neverInList = false): FieldRule =>
   R(cls, ['hr_admin', 'hr_ops'], true, neverInList);

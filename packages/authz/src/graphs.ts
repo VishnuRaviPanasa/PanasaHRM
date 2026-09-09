@@ -46,6 +46,11 @@ const EMPLOYEE_COLUMN: Record<ResourceType, string | null> = {
   team: null,
   employee_document: 'employee_id',
   payslip: 'employee_id',
+  // A salary annexure is about the person being hired. That is what makes the self-scope
+  // meaningful here even though nobody is granted it: `onboarding.annexure.read` denies the
+  // subject deliberately, and the column being right is what would make a future "let them see
+  // their own offer" row work without a second scope implementation.
+  salary_annexure: 'employee_id',
   org_config: null,
   audit_event: 'subject_employee_id',
   identity: 'employee_id',
