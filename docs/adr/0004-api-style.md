@@ -29,6 +29,32 @@ The API serves one first-party frontend. There are no external consumers (ADR-00
 
 Conventions are binding and live in `docs/standards/api-conventions.md`: UUIDv7 identifiers, cursor pagination, RFC 9457 problem details, `Idempotency-Key` required on balance-affecting writes, `ETag`/`If-Match` on mutable entities, and `X-Request-Id` propagated into logs, jobs and audit rows.
 
+### Amended 2026-09-08 (pre-acceptance)
+
+**`X-Request-Id` is untrusted input, and this is a security boundary, not a formatting rule.** The
+header is propagated into logs, jobs and `audit_event.correlation_id` - an append-only table with a
+decade-long retention. A client-supplied value reaching it unchecked is audit-trail poisoning into
+storage that by design cannot be corrected. Therefore:
+
+> The server **generates** the request id. An inbound `X-Request-Id` is accepted only from a
+> trusted proxy hop, and only if it matches a strict format (UUID); otherwise it is discarded and
+> a fresh id is generated. An inbound value is never written to `audit_event` without having
+> passed that validation, and the correlation id recorded in audit is always the server's own.
+
+**UUIDv7 versus what shipped.** This ADR mandates UUIDv7, but migrations 0002 and 0003 use
+`gen_random_uuid()` (v4) for every primary key. That is a real divergence and not a platform
+limitation - `uuidv7()` exists natively on the PostgreSQL 18.6 this project runs. Resolution:
+**UUIDv7 is the standard for new identifier columns from this point**; the four v4 columns already
+shipped are not worth a migration, because they carry no ordering assumption and no data depends on
+their generation scheme. A future migration may align them, and need not.
+
+**`docs/standards/api-conventions.md` does not exist yet** and this ADR is not sufficient on its
+own to finish task T9. What can be scaffolded from `ai/context/engineering-guidelines.md` and
+`architecture-principles.md` is the error model, RFC 9457 shape and cursor pagination; what remains
+genuinely undecided is idempotency-key replay semantics (window, storage, and what a repeated key
+with a *different* body must do) and ETag derivation. Those must be written before, not after, the
+endpoints that implement them.
+
 ## Consequences
 
 ### Positive

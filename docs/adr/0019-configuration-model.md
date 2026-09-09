@@ -68,7 +68,31 @@ recompute of March reads March's policy version.
 `org_setting`, a typed key/value table with no validity period. Company display name, address,
 logo, SMTP sender, notification reply-to, feature flags.
 
-Changes are audited but not versioned, because nothing computes history from them.
+Changes are to be audited but not versioned, because nothing computes history from them.
+
+> **Amended 2026-09-08 (pre-acceptance) - three corrections.**
+>
+> **(a) The dividing test was not applied exhaustively, and two things are in the wrong class.**
+> `org_setting['company.timezone']` is mutable, yet its own seed description reads *"Changing it
+> re-attributes punches"* - which is a direct "yes" to the test above. `leave_type` is mutable yet
+> carries `reduces_attendance`, `is_paid` and `requires_document_after_days`; verify case L2 is
+> literally *"WFH does not reduce attendance"*, i.e. a historical derivation input. Both must move
+> to Class 1. This costs one migration now, against a data-archaeology exercise after Phase 6.
+> **Not yet done - tracked as OR-11.**
+>
+> **(b) `org_setting` auditing does not exist.** The only mechanism on that table is a
+> `tg_org_setting_updated_at` timestamp trigger. There is no actor, no before/after, no reason -
+> so "who changed the SMTP sender" is **not** currently answerable, and rule 5 below is an
+> intention rather than a description. It becomes real when the audit path is wired to the
+> application (ADR-0008); until then this ADR must not be read as claiming the control exists.
+>
+> **(c) The resolvers fail soft, which undercuts the mitigation this ADR relies on.**
+> `fn_attendance_policy_asof('2019-06-15')` returns a single row with every threshold NULL rather
+> than raising - and the policy epoch is 2020-01-01, so any employee with more than ~6.7 years of
+> service resolves to nothing at all. Under *Negative / trade-offs* this ADR names the resolver as
+> **the** mitigation for silently computing the wrong answer; a resolver that silently returns
+> NULLs has precisely that failure mode. The resolvers must `RAISE` for a date outside the policy
+> epoch. **Not yet done - tracked as OR-11.**
 
 ### Rules that make this safe
 
@@ -81,7 +105,7 @@ Changes are audited but not versioned, because nothing computes history from the
    rows instead (ADR-0011), or it is rejected outright. It never silently mutates a paid period.
 4. **The screen shows blast radius before saving** — "this affects 1,247 attendance days across
    340 employees" — because a policy edit is a bulk data operation wearing a form.
-5. **Every change is audited** with actor, timestamp, before/after and a mandatory reason.
+5. **Every change is to be audited** with actor, timestamp, before/after and a mandatory reason. **Not yet implemented** - see amendment (b); the only mechanism on `org_setting` today is an `updated_at` timestamp trigger.
 
 ## Consequences
 
@@ -104,7 +128,7 @@ Changes are audited but not versioned, because nothing computes history from the
 
 ### Neutral
 
-- `org_setting` values are still audited, so "who changed the SMTP sender" remains answerable
+- `org_setting` values are still **intended to be** audited, so "who changed the SMTP sender" becomes answerable once the audit path is wired to the application (ADR-0008). It is **not** answerable today
 
 ## Reconsider when
 

@@ -38,6 +38,32 @@ Three separate concerns, deliberately not conflated:
 
 Two orthogonal scope graphs: the **reporting hierarchy** governs HR resources; **project membership** governs work resources. Neither widens into the other.
 
+### Amended 2026-09-08 (pre-acceptance) - three gaps that would otherwise be improvised
+
+**(a) The two graphs are not exhaustive, and `scope()` needs a defined answer for the remainder.**
+`org_setting`, `attendance_policy`, `employment_policy`, `leave_type`, `leave_policy` and
+`audit_event` are already in committed schema and belong to *neither* graph. They are
+**organisation-scoped**: not row-filtered by any graph, reachable only by an explicit permission,
+and denied by default. `scope()` for such a resource returns the **deny-all predicate unless the
+actor holds the resource's administrative permission**, in which case it returns the identity
+predicate. There is no third graph and no implicit "everyone can read configuration" - a policy row
+is a historical derivation input and reading it is a privilege.
+
+**(b) A role grant resolves as-of *now*, not as-of the record.** ADR-0002 makes `user_role`
+effective-dated, which leaves two readings: does a manager who left the role last month retain
+access to March's data when viewing it as-of March? **No.** Authorization resolves the actor's
+grants as of the *current* date; the as-of date selects which *data* is displayed, never which
+*permissions* apply. The two dates are independent and must never be conflated - conflating them
+would let an expired role be re-acquired by choosing a historical as-of date, which is a privilege
+escalation with a date picker as its interface.
+
+**(c) Relationship to `audit_column_policy`.** Two column registries now exist: this ADR's
+default-deny field registry, and `audit_column_policy` in migration 0001. They answer different
+questions - *may this actor see this field* versus *is this column recorded in audit* - and neither
+defaults the other. **Both default closed**: a field absent from the authz registry is **not
+visible**, and a column absent from `audit_column_policy` is **not** exempt from audit. Whoever
+adds a column must register it in both, and the absence of an entry is never permission.
+
 Coverage is mechanical: a global guard denies any route without `@Authorize` metadata, a boot assertion refuses to start if any route lacks it, and `authz-matrix.yaml` generates a test per (role x action x resource) cell asserting **both** allow and deny.
 
 ## Consequences

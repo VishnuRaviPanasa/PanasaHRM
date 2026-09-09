@@ -4,6 +4,16 @@
 Once Accepted a file is immutable and `.claude/hooks/guard-adr.mjs` refuses edits - supersede it
 with a new ADR instead.
 
+Two ADRs carry a condition a reader must not miss:
+
+- **ADR-0012 (payroll) is BLOCKED** pending plan question Q10, build-vs-buy. If payroll is bought,
+  it should be retired rather than amended (DEC-026, OR-09).
+- **ADR-0006 (leave balance) carries an acceptance precondition**: the anti-overdraw mechanism must
+  be implemented and concurrency-tested first.
+
+Every ADR was amended on 2026-09-08 following two adversarial verification passes. The findings and
+what remains open are in `adr-review-report.md` and `adr-review-report-pass2.md`.
+
 | ADR | Decision | Load-bearing because |
 |---|---|---|
 | [0001](0001-application-architecture.md) | Modular monolith | Keeps the domain write and its audit record in one transaction |
@@ -28,9 +38,17 @@ with a new ADR instead.
 
 ## Accepting an ADR
 
-Read it, then change `## Status` from `Proposed` to `Accepted`. From that moment the file is
-immutable - the guard enforces it, and a regression test proves the guard works
-(`node testing/hooks/guards.test.mjs`, cases T14-T19).
+Change `## Status` so that its **first non-blockquote line** is exactly `Accepted`. The parser
+reads only that line, so explanatory prose belongs on a `> ` blockquote beneath it - but do NOT
+write something like `Accepted 2026-09-08 (was Proposed)` on the status line itself unless you
+mean it: the parser accepts it now, though an earlier version silently read it as *not* Accepted
+and disabled the rail.
+
+From that moment the file is immutable. The guard covers Edit/Write **and** shell commands, with an
+independent commit-time check against the staged content; the one permitted change is
+`Superseded by ADR-NNNN`. `node testing/hooks/guards.test.mjs` (56 cases) proves it, and each case
+has been mutation-tested against the un-fixed hooks. Cases T14-T19 alone are NOT sufficient
+evidence - they passed while a total bypass existed, which is what the 2026-09-08 review found.
 
 **Accept deliberately, one at a time.** These are the decisions everything downstream inherits;
 0002, 0005, 0006 and 0015 are the ones whose reversal would be most expensive later.

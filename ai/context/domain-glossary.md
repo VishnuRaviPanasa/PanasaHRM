@@ -57,6 +57,10 @@ assignment of a person to a project; **this is the project authorization graph**
 **Work log** - one row per employee per day. **Work log entry** - a line item: project, task,
 **minutes**, description. **Timesheet period** - the approvable, lockable unit (weekly or
 monthly), *not* the individual day. **Effort** - always integer minutes; never decimal hours.
+**Effort cost** - money derived at report time from effort x an effective-dated rate; it is
+never stored on a work log entry (ADR-0016). Reading it is the action
+**`work.effort_cost:read`**, resolved through `AuthorizationService` - not a `comp_viewer`
+flag, which was an earlier name for this and must not appear in code.
 
 ## Workflow
 

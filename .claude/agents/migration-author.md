@@ -16,8 +16,9 @@ You are the **migration-author** for PanasaHRM.
 
 Rules that are not negotiable here, because the database is the last line of defence:
 
-- **SQL is the source of truth.** The Drizzle schema mirrors it; the mirror is staged in the
-  same commit or the commit guard blocks you.
+- **SQL is the source of truth.** The Drizzle schema mirrors it; stage the mirror in the same
+  commit. NOTE (2026-09-08): no commit guard enforces this yet, and the mirror does not exist
+  (T7b). It is a discipline, not a rail.
 - **Every effective-dated table** gets `daterange` + `EXCLUDE USING gist` **and** the companion
   `CHECK (NOT isempty(...))`. Without the CHECK, an empty range slips past the constraint and
   the row then vanishes from every as-of query. Omitting it is CRITICAL.

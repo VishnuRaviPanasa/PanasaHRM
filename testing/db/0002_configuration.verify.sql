@@ -28,13 +28,13 @@ END $$;
 DO $$
 DECLARE v_old attendance_policy; v_new attendance_policy;
 BEGIN
-    UPDATE attendance_policy SET valid_to = CURRENT_DATE WHERE valid_to IS NULL;
+    UPDATE attendance_policy SET valid_to = fn_business_date() WHERE valid_to IS NULL;
     INSERT INTO attendance_policy (legal_entity_id, grace_period_minutes, half_day_min_minutes,
                                    full_day_min_minutes, standard_day_minutes, valid_from, reason)
-    VALUES (NULL, 20, 240, 460, 480, CURRENT_DATE, 'verification: grace raised to 20');
+    VALUES (NULL, 20, 240, 460, 480, fn_business_date(), 'verification: grace raised to 20');
 
     v_old := fn_attendance_policy_asof(DATE '2021-06-15');
-    v_new := fn_attendance_policy_asof(CURRENT_DATE);
+    v_new := fn_attendance_policy_asof(fn_business_date());
 
     IF v_old.grace_period_minutes = 15 AND v_new.grace_period_minutes = 20 THEN
         RAISE NOTICE 'PASS  C2 history preserved: 2021 sees grace=%, today sees grace=%',
@@ -51,7 +51,7 @@ DECLARE v_ok BOOLEAN := false;
 BEGIN
     BEGIN
         INSERT INTO attendance_policy (legal_entity_id, valid_from, valid_to, reason)
-        VALUES (NULL, DATE '2020-06-01', DATE '2021-01-01', 'overlaps the initial version');
+        VALUES (NULL, DATE '2030-06-01', DATE '2031-01-01', 'overlaps the open-ended initial version');
     EXCEPTION WHEN exclusion_violation THEN v_ok := true;
     END;
     IF v_ok THEN RAISE NOTICE 'PASS  C3 overlapping policy period rejected';
@@ -119,7 +119,7 @@ END $$;
 DO $$
 DECLARE v employment_policy;
 BEGIN
-    v := fn_employment_policy_asof(CURRENT_DATE);
+    v := fn_employment_policy_asof(fn_business_date());
     IF v.notice_period_days = 90 AND v.probation_months IS NULL THEN
         RAISE NOTICE 'PASS  C8 notice=90, probation NULL (unresolved C4, not assumed zero)';
     ELSE
@@ -166,9 +166,15 @@ BEGIN
     ELSE RAISE EXCEPTION 'FAIL  C11 updated_at did not advance'; END IF;
 END $$;
 
--- Restore the seeded state so the verify script is idempotent.
-DELETE FROM attendance_policy WHERE reason LIKE 'verification:%';
-UPDATE attendance_policy SET valid_to = NULL WHERE valid_from = DATE '2020-01-01';
-UPDATE org_setting SET value = '"Panasa"' WHERE key = 'company.display_name';
+-- No restore block. It was removed on 2026-09-08 for two independent reasons:
+--
+--   1. It is redundant. scripts/migrate.mjs now runs every verify script inside a transaction
+--      that is always rolled back (DEC-024), so idempotency is structural rather than manual.
+--
+--   2. It was itself a Rule 3 violation. `UPDATE attendance_policy SET valid_to = NULL` re-opened
+--      a closed period, and the DELETE removed policy versions outright. Migration 0004 now
+--      blocks both, so this block would fail. The ADR verification noted that the suite
+--      demonstrated the hole while reporting green - restoring state by rewriting history is
+--      exactly the operation the system must refuse.
 
 SELECT 'CONFIGURATION VERIFICATION COMPLETE' AS result;

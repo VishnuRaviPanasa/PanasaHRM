@@ -74,6 +74,12 @@
             "command": "node ${CLAUDE_PROJECT_DIR}/.claude/hooks/guard-commit.mjs",
             "timeout": 30,
             "statusMessage": "Checking staged changes for secrets, migrations, authz..."
+          },
+          {
+            "type": "command",
+            "command": "node ${CLAUDE_PROJECT_DIR}/.claude/hooks/guard-adr.mjs",
+            "timeout": 10,
+            "statusMessage": "Checking ADR immutability (shell)..."
           }
         ]
       },

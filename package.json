@@ -22,9 +22,29 @@
     "db:down": "docker compose -f infrastructure/compose/docker-compose.dev.yml down",
     "db:status": "node scripts/migrate.mjs status",
     "db:migrate": "node scripts/migrate.mjs up",
-    "db:verify": "node scripts/migrate.mjs verify"
+    "db:verify": "node scripts/migrate.mjs verify",
+    "db:seed": "node scripts/seed.mjs",
+    "api:dev": "npm run dev --workspace @panasa/api",
+    "api:build": "npm run build --workspace @panasa/api",
+    "api:start": "npm run start --workspace @panasa/api",
+    "demo:test": "node testing/demo/demo-flow.test.mjs",
+    "web:dev": "npm run dev --workspace @panasa/web",
+    "web:build": "npm run build --workspace @panasa/web",
+    "web:start": "npm run start --workspace @panasa/web",
+    "punch:test": "node testing/demo/punch-flow.test.mjs",
+    "privacy:test": "node testing/demo/profile-privacy.test.mjs",
+    "authz:build": "npm run build --workspace @panasa/authz",
+    "authz:test": "node testing/authz/matrix.test.mjs",
+    "upload:test": "node testing/authz/upload-validation.test.mjs",
+    "docs:test": "node testing/demo/documents-flow.test.mjs",
+    "settings:test": "node testing/demo/settings-access.test.mjs",
+    "reports:test": "node testing/demo/reports-scope.test.mjs",
+    "nav:test": "node testing/demo/nav-shell.test.mjs",
+    "payslip:test": "node testing/demo/payslip-flow.test.mjs",
+    "masters:test": "node testing/demo/masters-flow.test.mjs"
   },
   "devDependencies": {
-    "prettier": "^3.3.3"
+    "prettier": "^3.3.3",
+    "js-yaml": "^4.1.0"
   }
 }

@@ -27,7 +27,15 @@ PanasaHRM serves one organization of at most a few thousand employees, built and
 
 A **modular monolith**. One NestJS API, one PostgreSQL database, one Next.js frontend. Modules (`identity`, `organization`, `people`, `documents`, `workflow`, `leave`, `work`, `attendance`, `notifications`, `audit`) own their own tables and expose a public interface. Cross-module communication is via domain events through a transactional outbox (ADR-0008). Workers run in the same image, toggled by an environment flag.
 
-The genuine risk of a monolith is **boundary erosion**, so boundaries are enforced mechanically by `eslint-plugin-boundaries` and reviewed by the `authz-auditor` and `reviewer` agents - not by good intentions.
+The genuine risk of a monolith is **boundary erosion**, so boundaries are to be enforced mechanically by `eslint-plugin-boundaries` and reviewed by the `authz-auditor` and `reviewer` agents - not by good intentions.
+
+> **Enforcement status (amended 2026-09-08, pre-acceptance).** `eslint-plugin-boundaries` is **not
+> yet configured**. ESLint is deferred until there is TypeScript to lint and module paths for the
+> rule to enforce (DEC-002, task T13), so module-boundary enforcement is currently *documentation,
+> not mechanism* - tracked as **OR-05**. This paragraph deliberately says "are to be enforced"
+> rather than "are enforced": an Accepted ADR outranks every other document in this repo, so a
+> present-tense claim about a control that does not exist would become a permanent false
+> statement of fact. The named exception to this rule is recorded in ADR-0016.
 
 ## Consequences
 

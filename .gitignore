@@ -44,3 +44,8 @@ Thumbs.db
 # local data volumes
 .data/
 tmp/
+
+# Hook working state - absolute machine-local paths, not project content.
+# `**/` because a pattern containing a slash is anchored to this file's directory, and
+# the workspaces keep their own copies (apps/api, apps/web).
+**/.claude/state/dirty-files.txt

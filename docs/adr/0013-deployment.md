@@ -29,7 +29,25 @@ Docker Compose on a single company-controlled VM: nginx (TLS, headers, rate limi
 
 Migrations run as a **separate one-shot container**, never on app boot - an app-boot migration means replicas race and a failed migration takes the app down.
 
-Deployment is by **image digest**, built in CI, never built on the production host.
+Deployment is to be by **image digest**, built in CI, never built on the production host.
+
+### Amended 2026-09-08 (pre-acceptance)
+
+**(a) No CI exists yet**, so "built in CI, never on the host" is the standard this deployment must
+meet, not a description of current practice. There is no `.github/workflows` directory (task T12).
+
+**(b) The principal accepted risk has no control behind it.** This ADR accepts single-host failure
+on the basis that off-host encrypted backups bound the loss. There is **no backup script, no
+restore runbook, and no verified restore drill** - and unlike ESLint (OR-05) or the unpushed remote
+(OR-04), this had **no OPEN_RISKS entry at all**, so it was an accepted risk nobody was tracking.
+Now recorded. A single-VM deployment whose backup story is unwritten is not a considered trade-off,
+it is an unexamined one, and Phase 9 gates go-live on a completed restore drill.
+
+**(c) The PostgreSQL data path is not where a naive restore will look.** DEC-010 mounts the volume
+at `/var/lib/postgresql` rather than `/var/lib/postgresql/data`, because the PG18 image places data
+in a major-version subdirectory so `pg_upgrade --link` works across a mount boundary. The live path
+is therefore `/var/lib/postgresql/18/docker`. Any backup or restore procedure must target it
+explicitly; this was recorded only in a DEC entry and is easy to get wrong at 3am.
 
 ## Consequences
 

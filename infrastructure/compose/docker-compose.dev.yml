@@ -48,7 +48,7 @@ services:
     container_name: hrm-redis
     command: ["redis-server", "--requirepass", "redis_dev_only", "--appendonly", "yes"]
     ports:
-      - "127.0.0.1:${HRM_REDIS_PORT:-56379}:6379"
+      - "127.0.0.1:${HRM_REDIS_PORT:-55379}:6379"
     volumes:
       - redisdata:/data
     healthcheck:

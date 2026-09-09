@@ -7,6 +7,14 @@ Proposed
 > Only a human may set this to Accepted. Once Accepted this file is immutable and
 > `.claude/hooks/guard-adr.mjs` will refuse edits - supersede it with a new ADR instead.
 
+> **Acceptance precondition (human decision, 2026-09-08).** This ADR must NOT be accepted until
+> the database anti-overdraw mechanism described below is **implemented and concurrency-tested**.
+> The mechanism is the entire content of this decision; accepting it while it exists only on
+> paper would ratify a guarantee nothing provides. The required evidence is a test that runs N
+> concurrent spend transactions against a single account and proves no interleaving overdraws -
+> including the two cases identified in review as the ones the original text did not cover: a
+> first-ever request (no account row yet) and the first request of a new leave year.
+
 ## Date
 
 2026-09-08
@@ -41,7 +49,66 @@ CONSTRAINT ck_leave_account_no_overdraw CHECK (available >= -allowed_negative)
 
 **And the lock cannot be forgotten, because the database takes it:** a `BEFORE INSERT` trigger on `leave_ledger` performs `SELECT ... FOR UPDATE` on the account row regardless of what the caller did.
 
-Overdrawing is therefore a `23514` constraint violation - loud, in the database, on every code path, forever.
+### What the trigger does, precisely
+
+Stating this exactly matters, because a lock alone does not raise `23514`. A CHECK on
+`leave_account` is evaluated only when `leave_account` is written; an INSERT into `leave_ledger`
+on its own evaluates nothing. The trigger therefore performs **three** steps in one transaction:
+
+1. **Materialise then lock.** `INSERT ... ON CONFLICT DO NOTHING` the account row for
+   `(employee, leave_type, leave_year)`, then `SELECT ... FOR UPDATE` it. The insert comes first
+   because `SELECT ... FOR UPDATE` on a row that does not exist locks nothing - which would leave
+   the serialisation point absent exactly at a first-ever request and at every new leave year.
+2. **Update the projection from the ledger**, in the same statement path as the ledger insert.
+   This write is what causes the CHECK to be evaluated.
+3. **Let the constraint decide.** If the resulting `available` falls below `-allowed_negative`,
+   the CHECK raises and the whole transaction - ledger row included - rolls back.
+
+Overdrawing is therefore a `23514` constraint violation - loud, in the database, on every code
+path, forever. No caller can opt out, because no caller performs step 2.
+
+### Authoritative vs derived - and the permitted exception to Must-Know Rule 6
+
+**`leave_ledger` is authoritative. `leave_account` is derived.** The account row is a constrained
+projection of the ledger and never an independent source of truth: if the two disagree, the ledger
+is right by definition and the account row is repaired from it. Nothing may read the account row
+as an answer without that being reconcilable to a ledger fold.
+
+Must-Know Rule 6 says *never mutate a leave balance directly; append a ledger entry; the balance
+is derived*. This ADR's mechanism performs an `UPDATE` on `leave_account`, so the relationship
+must be stated rather than left implicit:
+
+> **Permitted exception to Must-Know Rule 6.** The `leave_account` projection is written **only**
+> by the `leave_ledger` trigger described above, inside the same transaction as the ledger row
+> that caused it, and only ever to the value derived from that ledger. Direct `UPDATE` on
+> `leave_account` by application code, by a repository, or by any other trigger is forbidden, and
+> `hrm_app` is to hold no UPDATE grant on the table. **That role does not exist yet** - no
+> application role has been created, so today this half of the exception is a design commitment
+> rather than a control, and the trigger is the only thing enforcing it.
+>
+> **This is not a relaxation of Rule 6 - it is the mechanism by which Rule 6 is enforced.** The
+> rule prohibits a balance that can be set independently of the ledger. The exception permits
+> exactly one writer, whose only possible input is the ledger. A change that lets anything else
+> write `leave_account` is not covered by this exception and contradicts this ADR.
+
+The nightly reconciliation job named under *Negative / trade-offs* exists to detect violation of
+this exception, not merely to detect drift.
+
+### The resolved policy version is recorded on the ledger row
+
+`leave_policy` is effective-dated (ADR-0002/0019) and `leave_ledger` is append-only, so a ledger
+entry written today under today's policy must remain re-derivable after that policy is superseded.
+Every ledger row therefore carries **`leave_policy_id`** - the specific policy *version* that was
+resolved when the entry was written, not the leave type and not a lookup performed at read time.
+
+This closes the one seam that separated this ADR from the other arithmetic decisions: ADR-0011
+snapshots its derivation inputs on `attendance_day`, and ADR-0012 records the rule version on every
+payroll line. Without it, "why is my balance 12 and not 15" becomes unanswerable the moment policy
+changes, and the accrual engine cannot distinguish a genuine correction from a policy shift.
+
+The same applies to the accrual and carry-forward jobs: each writes the policy version it acted
+under, so a re-run under a newer policy produces a *new compensating entry* rather than silently
+re-deciding history.
 
 ## Consequences
 

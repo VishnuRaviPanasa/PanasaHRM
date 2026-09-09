@@ -16,7 +16,9 @@
 
 1. **Write the failing test first** - a pgTAP assertion that the constraint rejects the bad case.
 2. Write the `.sql` migration. Numbered, `NNNN_short_description.sql`.
-3. Mirror it in the Drizzle schema. **Same commit** - the commit guard blocks otherwise.
+3. Mirror it in the Drizzle schema, in the **same commit**. NOTE (2026-09-08): no commit guard
+   enforces this yet - `guard-commit.mjs` has no mirror check, and the Drizzle mirror does not
+   exist (task T7b). Treat it as a discipline you must keep, not a rail that will catch you.
 4. Add the `DO $$ ... $$` assertion block proving the migration did what it claimed.
 5. Run the test. It must now pass, and must have failed before.
 

@@ -1,0 +1,97 @@
+@import 'tailwindcss';
+
+/*
+ * ART HRM theme.
+ *
+ * Taken from the Art Technology and Software brand: a gold disc mark on near-black, with grey
+ * neutrals. Two decisions in here are deliberate and worth reading before changing a hex value.
+ *
+ * 1. GOLD IS NEVER A BACKGROUND FOR WHITE TEXT.
+ *    The brand gold (#ffca06) against white text is about 1.6:1 - illegible, and nowhere near
+ *    the 4.5:1 WCAG AA needs. The brand itself never does this either: the logo and the banner
+ *    pair gold with near-black. So gold surfaces carry `ink-900` text (11.5:1) and the PRIMARY
+ *    ACTION is near-black with white text (17.6:1), which is also what the black banner does.
+ *    `brand-700` (#8a6b00) is the bronze end of the ramp and is the only gold safe as TEXT on
+ *    white (5.0:1).
+ *
+ * 2. GOLD IS BRAND IDENTITY, NOT MEANING.
+ *    This palette already spends amber on "pending / late". If gold were also the primary-action
+ *    colour, the two would blur and an amber badge would stop reading as a state. So gold is
+ *    confined to the logo, the active navigation tint and brand accents; green/amber/red keep
+ *    their meanings untouched.
+ */
+@theme {
+  /* Neutrals, warmed very slightly so they sit under gold rather than fighting it. */
+  --color-ink-50: #f7f7f6;
+  --color-ink-100: #eeeeec;
+  --color-ink-200: #dcdcd8;
+  --color-ink-300: #b8b8b2;
+  --color-ink-400: #85857e;
+  --color-ink-500: #63635d;
+  --color-ink-600: #4c4c47;
+  --color-ink-700: #3c3c38;
+  --color-ink-800: #262625;
+  --color-ink-900: #17171a;
+
+  /*
+   * ART gold. `500` is the MEASURED flat gold of the supplied icon (#ffca06), taken by decoding
+   * the raster and using the modal value - the pixel mean is #f4c716, but that is dragged down
+   * by the original's gloss shading, which a flat UI should not reproduce.
+   * `700` is the only step legible as TEXT on white (5.0:1).
+   */
+  --color-brand-50: #fff9e6;
+  --color-brand-100: #fff0bd;
+  --color-brand-200: #ffe285;
+  --color-brand-300: #ffd54d;
+  --color-brand-400: #ffcf24;
+  --color-brand-500: #ffca06;
+  --color-brand-600: #d9a800;
+  --color-brand-700: #8a6b00;
+
+  /* The near-black the brand uses for its banner, and here for the primary action. */
+  --color-ink-950: #0f0f11;
+}
+
+html {
+  -webkit-text-size-adjust: 100%;
+}
+
+body {
+  background: var(--color-ink-50);
+  color: var(--color-ink-800);
+  font-family: ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+/*
+ * Visible focus everywhere. Keyboard users are not an edge case.
+ *
+ * The ring is near-black rather than gold: a focus indicator needs 3:1 against its background,
+ * and gold on white manages about 2.2:1. Near-black works on white, on ink-50 and on a gold
+ * surface alike, and the 2px offset keeps it separated from the control it marks.
+ */
+*:focus-visible {
+  outline: 2px solid var(--color-ink-900);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+/* Tabular figures for anything numeric, so columns line up as values change. */
+.num {
+  font-variant-numeric: tabular-nums;
+}
+
+@keyframes hrm-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.45; }
+}
+.skeleton {
+  animation: hrm-pulse 1.4s ease-in-out infinite;
+  background: var(--color-ink-200);
+  border-radius: 6px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .skeleton { animation: none; }
+}

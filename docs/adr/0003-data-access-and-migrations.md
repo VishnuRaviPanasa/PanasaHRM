@@ -26,7 +26,26 @@ The data model depends on PostgreSQL features an ORM-owned schema handles poorly
 
 ## Decision
 
-**Hand-written SQL migrations in `infrastructure/db/migrations/*.sql` are the source of truth.** The Drizzle TypeScript schema is a *mirror* used for typed queries, verified against the database by drift detection in the gate and in CI.
+**Hand-written SQL migrations in `infrastructure/db/migrations/*.sql` are the source of truth.** The Drizzle TypeScript schema is a *mirror* used for typed queries, verified against the database by **schema-mirror drift detection** in the gate and in CI.
+
+### "Drift detection" names two different mechanisms - amended 2026-09-08
+
+The term was used for two unrelated checks, only one of which exists. They are now named
+separately, because `docs/backlog.md` marked the wrong one done:
+
+| Name | What it compares | Status |
+|---|---|---|
+| **Migration-file drift** | The checksum of a migration file against the checksum recorded when it was applied | **Implemented** in `scripts/migrate.mjs` (DEC-012/014). Verified: editing an applied migration causes `status` to report `DRIFT` and `up` to refuse |
+| **Schema-mirror drift** | The live database schema against the Drizzle TypeScript mirror | **Not implemented.** The Drizzle mirror itself does not exist yet (task T7b) |
+
+**Schema-mirror drift detection is not yet specified precisely enough to build**, and this ADR does
+not pretend otherwise. `scripts/README.md` refers to "drift checks D1-D9"; **D1-D9 are enumerated
+nowhere in the repository**. Before the mirror is built, the check must state how it treats the
+constructs Drizzle cannot express - and which are most of this schema: `EXCLUDE USING gist`
+constraints, `GENERATED ALWAYS AS ... STORED` columns, range types, partitioned tables and their
+routing function, and every trigger in migrations 0001 and 0004. A mirror check that silently
+ignores those would report green on a schema it cannot actually represent, which is worse than no
+check.
 
 Drizzle imports are permitted **only** inside `**/infrastructure/repositories/**`. Application code sees repositories, never Drizzle types. Raw SQL via `db.execute(sql\`...\`)` is permitted for recursive CTEs and JSONB paths, and is reviewed as a cross-module concern.
 
@@ -40,7 +59,7 @@ Drizzle imports are permitted **only** inside `**/infrastructure/repositories/**
 
 ### Negative / trade-offs
 
-- **Two representations of the schema that can drift.** Mitigated by drift detection, and by the commit guard requiring the mirror to be staged alongside a migration - but the risk is real and the detection is load-bearing
+- **Two representations of the schema that can drift.** To be mitigated by schema-mirror drift detection and by a commit guard requiring the mirror to be staged alongside a migration. **Neither exists yet** (amended 2026-09-08): `guard-commit.mjs` has no such check, and `ai/agents/migration-author.md` repeated the claim to the agent as though it did. Until both are built the risk is unmitigated, and it is load-bearing
 - A contributor expecting `drizzle-kit generate` to author migrations from TypeScript will be confused. Documented in the migrations README
 - The escape hatch to raw SQL is also a bypass of the audit interceptor, which is part of why audit is enforced by trigger as well (ADR-0008)
 

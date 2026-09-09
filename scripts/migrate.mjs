@@ -144,7 +144,44 @@ const cmdUp = () => {
   return 0;
 };
 
+// The verification scripts are adversarial: they INSERT audit rows, create partitions, close
+// live policy periods and reopen them. Run bare, that is not a test suite - it is a writer.
+// Two independent protections, because either alone has a hole:
+//
+//   1. Every script runs inside a transaction that is ALWAYS rolled back. The suites already
+//      catch their expected errors inside `DO $$ ... EXCEPTION ... $$` blocks (plpgsql
+//      subtransactions), so a wrapping transaction does not change a single verdict - it only
+//      stops the side effects surviving. DDL is transactional in PostgreSQL, so partitions
+//      created by a test disappear too.
+//
+//   2. A target guard. Rollback does not protect a database that should never have been
+//      connected to in the first place, and this runner honours PGHOST/PGDATABASE.
+//
+// Found by the 2026-09-08 ADR review (finding D-14): before this, each `db:verify` run left a
+// fabricated `people.employee.hired` row in the permanently undeletable audit log, and
+// `audit_event_p203007` persisted in the dev database.
+const DEV_TARGET = { hosts: ['127.0.0.1', 'localhost', '::1'], port: '55432', db: 'hrm' };
+const OVERRIDE = 'HRM_VERIFY_ALLOW_NONDEV';
+
+const isDevTarget = () =>
+  DEV_TARGET.hosts.includes(conn.host) &&
+  String(conn.port) === DEV_TARGET.port &&
+  conn.db === DEV_TARGET.db;
+
 const cmdVerify = () => {
+  if (!isDevTarget() && process.env[OVERRIDE] !== 'i-understand') {
+    console.error(
+      `REFUSED: verify writes to the database it runs against, and this target is not the\n` +
+      `dev stack.\n\n` +
+      `  target : ${conn.user}@${conn.host}:${conn.port}/${conn.db}\n` +
+      `  expected: hrm@${DEV_TARGET.hosts[0]}:${DEV_TARGET.port}/${DEV_TARGET.db}\n\n` +
+      `Every script is rolled back, but a rollback still takes locks and still writes WAL on\n` +
+      `whatever it connects to. Verification belongs on a disposable database.\n\n` +
+      `If you genuinely mean this target:  ${OVERRIDE}=i-understand npm run db:verify`
+    );
+    return 2;
+  }
+
   if (!existsSync(VERIFY_DIR)) { console.log('no verification scripts'); return 0; }
   const files = readdirSync(VERIFY_DIR).filter((f) => f.endsWith('.verify.sql')).sort();
   if (files.length === 0) { console.log('no verification scripts'); return 0; }
@@ -153,7 +190,12 @@ const cmdVerify = () => {
   for (const f of files) {
     process.stdout.write(`verifying ${f}\n`);
     try {
-      const out = psql(['-f', join(VERIFY_DIR, f)]);
+      // BEGIN and ROLLBACK are passed as separate -c commands around the -f file: psql runs
+      // them in order in one session, so the explicit transaction spans the whole script.
+      // ON_ERROR_STOP=1 (set in the psql helper) means a genuine failure aborts before the
+      // ROLLBACK is reached - which is harmless, since psql rolls back an open transaction
+      // when the session ends anyway.
+      const out = psql(['-c', 'BEGIN;', '-f', join(VERIFY_DIR, f), '-c', 'ROLLBACK;']);
       for (const line of out.split('\n')) {
         if (/PASS|FAIL|INFO/.test(line)) console.log('   ' + line.replace(/^.*NOTICE:\s+/, ''));
       }

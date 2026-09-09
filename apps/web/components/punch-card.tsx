@@ -1,0 +1,483 @@
+'use client';
+
+import { useEffect, useState } from 'react';
+import { api, ApiError, hm, useData } from '@/lib/api';
+import { Badge, Button, Card, CardHead, Toast, inputCls } from '@/components/ui';
+
+/**
+ * The attendance punch card.
+ *
+ * THE CARD HAS ONE JOB, AND IT IS NOW THE BIGGEST THING ON IT.
+ *
+ * The previous version gave its 30px hero to the elapsed TIME and put the action beside it as an
+ * ordinary button - so before you had checked in, a meaningless `0h 0m` was the focal point and
+ * the only thing you could actually do was the smallest element in the row. Three separate blocks
+ * of prose (the header hint, the retention note, the office list) then out-measured both, and an
+ * empty "no punches yet" panel added height to say nothing.
+ *
+ * So the card is built around THREE STATES, and in each one the hero is whatever matters:
+ *
+ *   NOT STARTED  the action is the hero. No zero, no empty punch list, one line of context.
+ *   ON THE CLOCK the live elapsed time is the hero, because that is the number being asked for.
+ *   DONE         the day's total is the hero, with checking in again offered quietly.
+ *
+ * WHAT DID NOT GET CUT: the sentence saying location is captured at the punch. Everything else
+ * moved into a disclosure, but consent has to be legible BEFORE the action, not one click away
+ * from it - so the one line that says what is about to happen sits next to the button that does
+ * it. The retention detail and the office list are the answer to "tell me more", which is a
+ * different question and belongs behind a summary.
+ */
+
+interface Today {
+  businessDate: string;
+  punches: {
+    id: number; punched_at: string; direction: 'in' | 'out';
+    accuracy_m: number | null; distance_m: number | null;
+    location_verified: boolean; location_source: string;
+    note: string | null; location_name: string | null;
+  }[];
+  day: {
+    status: string; first_in_at: string | null; last_out_at: string | null; worked_minutes: number;
+  } | null;
+  checkedIn: boolean;
+  since: string | null;
+  nextDirection: 'in' | 'out';
+  offices: { code: string; name: string; address: string | null; radius_m: number }[];
+}
+
+interface PunchResult {
+  punch: { direction: string; punched_at: string; location_verified: boolean; location_source: string };
+  day: { status: string; worked_minutes: number } | null;
+  location: { name: string; code: string; distanceM: number; radiusM: number; verified: boolean } | null;
+  locationSource: string;
+}
+
+const clock = (iso: string | null) =>
+  (iso
+    ? new Date(iso).toLocaleTimeString('en-IN', {
+      hour: '2-digit', minute: '2-digit', hour12: false, timeZone: 'Asia/Kolkata',
+    })
+    : '—');
+
+const dayName = (iso: string) => {
+  const d = new Date(`${iso}T00:00:00`);
+  return d.toLocaleDateString('en-IN', { weekday: 'long', day: 'numeric', month: 'long' });
+};
+
+/** Elapsed minutes since check-in, ticking. */
+function useElapsed(since: string | null) {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    if (!since) return undefined;
+    // Every 20s: the display is in minutes, so this is frequent enough that the number is never
+    // visibly stale and rare enough to be free.
+    const t = setInterval(() => setNow(Date.now()), 20_000);
+    return () => clearInterval(t);
+  }, [since]);
+  if (!since) return null;
+  return Math.max(0, Math.round((now - new Date(since).getTime()) / 60000));
+}
+
+type GeoState =
+  | { kind: 'idle' }
+  | { kind: 'locating' }
+  | { kind: 'ok'; lat: number; lon: number; accuracy: number }
+  | { kind: 'denied' }
+  | { kind: 'unavailable'; reason: string };
+
+export function PunchCard({ onChanged }: { onChanged?: () => void }) {
+  const state = useData<Today>('/attendance/today');
+  const [geo, setGeo] = useState<GeoState>({ kind: 'idle' });
+  const [busy, setBusy] = useState(false);
+  const [note, setNote] = useState('');
+  const [noteOpen, setNoteOpen] = useState(false);
+  const [toast, setToast] = useState<{ msg: string; tone: 'good' | 'bad' } | null>(null);
+  const [lastResult, setLastResult] = useState<PunchResult | null>(null);
+
+  const elapsed = useElapsed(state.data?.checkedIn ? state.data.since : null);
+
+  /**
+   * Ask the browser for a fix. Resolves rather than rejects on failure: refusing location must
+   * not block a punch, so every outcome is a state we can record honestly.
+   */
+  function locate(): Promise<GeoState> {
+    return new Promise((resolve) => {
+      if (typeof navigator === 'undefined' || !navigator.geolocation) {
+        resolve({ kind: 'unavailable', reason: 'This browser has no location support' });
+        return;
+      }
+      setGeo({ kind: 'locating' });
+      navigator.geolocation.getCurrentPosition(
+        (pos) => resolve({
+          kind: 'ok',
+          lat: Number(pos.coords.latitude.toFixed(6)),
+          lon: Number(pos.coords.longitude.toFixed(6)),
+          accuracy: Math.round(pos.coords.accuracy),
+        }),
+        (err) => resolve(
+          err.code === err.PERMISSION_DENIED
+            ? { kind: 'denied' }
+            : {
+              kind: 'unavailable',
+              reason: err.code === err.TIMEOUT ? 'Location timed out' : 'Location unavailable',
+            },
+        ),
+        { enableHighAccuracy: true, timeout: 10_000, maximumAge: 30_000 },
+      );
+    });
+  }
+
+  async function punch(direction: 'in' | 'out') {
+    setBusy(true);
+    setLastResult(null);
+    try {
+      const fix = await locate();
+      setGeo(fix);
+
+      const res = await api.post<PunchResult>('/attendance/punch', {
+        direction,
+        latitude: fix.kind === 'ok' ? fix.lat : null,
+        longitude: fix.kind === 'ok' ? fix.lon : null,
+        accuracy: fix.kind === 'ok' ? fix.accuracy : null,
+        locationSource: fix.kind === 'denied' ? 'denied'
+          : fix.kind === 'unavailable' ? 'unavailable' : undefined,
+        note: note || null,
+      });
+
+      setLastResult(res);
+      setNote('');
+      setNoteOpen(false);
+      setToast({
+        msg: direction === 'in'
+          ? `Checked in at ${clock(res.punch.punched_at)}${res.location?.verified ? ` · ${res.location.name}` : ''}`
+          : `Checked out at ${clock(res.punch.punched_at)} · ${hm(res.day?.worked_minutes ?? 0)} recorded`,
+        tone: 'good',
+      });
+      await state.reload();
+      onChanged?.();
+    } catch (err) {
+      setToast({ msg: err instanceof ApiError ? err.message : 'Could not record that', tone: 'bad' });
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  if (state.loading) {
+    return (
+      <Card>
+        <CardHead title="Today" />
+        <div className="space-y-2 p-4 sm:p-5" role="status" aria-label="Loading">
+          <div className="skeleton h-9 w-44" />
+          <div className="skeleton h-4 w-56" />
+        </div>
+      </Card>
+    );
+  }
+  if (state.error || !state.data) {
+    return (
+      <Card>
+        <CardHead title="Today" />
+        <div
+          role="alert"
+          className="m-4 rounded-lg bg-rose-50 p-4 text-[13px] text-rose-800 ring-1 ring-inset ring-rose-200 sm:m-5"
+        >
+          {state.error ?? 'Could not load today'}
+          <Button variant="secondary" size="sm" className="mt-3" onClick={state.reload}>
+            Try again
+          </Button>
+        </div>
+      </Card>
+    );
+  }
+
+  const d = state.data;
+  const working = d.checkedIn;
+  /*
+   * THE DISCRIMINATOR IS THE PUNCH LOG, NOT THE WORKED MINUTES.
+   *
+   * The first version tested `worked_minutes > 0`, and checking in and out inside the same minute
+   * produced `worked_minutes: 0` with two punches on the record - so the card fell through to
+   * "Ready to start your day" for somebody who had just finished. That is the same incoherence
+   * the seed was fixed for, reintroduced one layer up: a derived TOTAL is the wrong thing to ask
+   * about whether something happened. The punches are the facts; the total is a summary of them,
+   * and a summary is allowed to be zero.
+   *
+   * `d.day` is included because a future attendance regularization can produce a derived day with
+   * no punches behind it (an approved correction), and that day is finished too.
+   */
+  const done = !working && (d.punches.length > 0 || d.day !== null);
+  const notStarted = !working && !done;
+
+  const locating = geo.kind === 'locating';
+  const action = working ? 'out' : 'in';
+  const label = locating ? 'Getting your location…'
+    : working ? 'Check out'
+      : done ? 'Check in again' : 'Check in';
+
+  /*
+   * The hero panel's tint carries the state, so it is readable before any text is.
+   *
+   * Gold for the pending action - DEC-054 confines gold to brand accents and keeps amber for
+   * "pending / late", and this is a brand-forward call to action rather than a warning. Emerald
+   * while on the clock, because that is the one state where something is actively true.
+   */
+  const panel = working
+    ? 'bg-emerald-50/70 ring-emerald-200'
+    : notStarted ? 'bg-brand-50 ring-brand-200' : 'bg-ink-50 ring-ink-200';
+
+  return (
+    <Card>
+      <CardHead
+        title="Today"
+        hint={dayName(d.businessDate)}
+        action={d.day ? <Badge status={d.day.status} /> : <Badge status="draft">not started</Badge>}
+      />
+
+      <div className="p-4 sm:p-5">
+        {/* THE ACTION ZONE. One panel, one decision. */}
+        <div className={`rounded-xl p-4 ring-1 ring-inset sm:p-5 ${panel}`}>
+          <div className="flex flex-wrap items-center justify-between gap-x-6 gap-y-4">
+            <div className="min-w-0">
+              {working ? (
+                <>
+                  <div className="flex items-center gap-2">
+                    <span
+                      aria-hidden
+                      className="h-2 w-2 animate-pulse rounded-full bg-emerald-600"
+                    />
+                    <span className="text-[12px] font-semibold uppercase tracking-[0.07em] text-emerald-800">
+                      On the clock
+                    </span>
+                  </div>
+                  <div className="num mt-1 text-[34px] font-semibold leading-none text-ink-900">
+                    {hm(elapsed ?? 0)}
+                  </div>
+                  <p className="mt-1.5 text-[13px] text-ink-600">
+                    since <span className="num font-medium text-ink-800">{clock(d.since)}</span>
+                  </p>
+                </>
+              ) : done ? (
+                <>
+                  <span className="text-[12px] font-semibold uppercase tracking-[0.07em] text-ink-500">
+                    Recorded today
+                  </span>
+                  <div className="num mt-1 text-[34px] font-semibold leading-none text-ink-900">
+                    {hm(d.day?.worked_minutes ?? 0)}
+                  </div>
+                  <p className="mt-1.5 text-[13px] text-ink-600">
+                    in <span className="num font-medium text-ink-800">{clock(d.day?.first_in_at ?? null)}</span>
+                    {' · '}
+                    out <span className="num font-medium text-ink-800">{clock(d.day?.last_out_at ?? null)}</span>
+                  </p>
+                </>
+              ) : (
+                <>
+                  {/*
+                    * No `0h 0m` here. A zero as the hero is worse than no number: it draws the eye
+                    * to the one thing on the card that carries no information.
+                    */}
+                  <div className="text-[19px] font-semibold leading-tight text-ink-900">
+                    Ready to start your day
+                  </div>
+                  <p className="mt-1 text-[13.5px] text-ink-600">
+                    You have not checked in yet.
+                  </p>
+                </>
+              )}
+            </div>
+
+            <div className="flex shrink-0 flex-col items-stretch gap-2 sm:items-end">
+              <Button
+                size="lg"
+                variant={working ? 'secondary' : 'primary'}
+                busy={busy}
+                onClick={() => punch(action)}
+                className="min-w-[10.5rem]"
+              >
+                {label}
+              </Button>
+              {/*
+                * The note is one click away rather than always on screen. It is used on a small
+                * minority of punches, and an empty text field beside the primary action reads as
+                * something you are expected to fill in first.
+                */}
+              {noteOpen ? (
+                <>
+                  <label htmlFor="punch-note" className="sr-only">Note for this punch</label>
+                  <input
+                    id="punch-note"
+                    type="text"
+                    autoFocus
+                    className={`${inputCls} !mt-0 sm:w-[10.5rem]`}
+                    placeholder="Reason, if any"
+                    value={note}
+                    onChange={(e) => setNote(e.target.value)}
+                  />
+                </>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => setNoteOpen(true)}
+                  className="text-[12.5px] font-medium text-ink-500 underline decoration-ink-300 underline-offset-2 hover:text-ink-800"
+                >
+                  Add a note
+                </button>
+              )}
+            </div>
+          </div>
+
+          {/*
+            * The consent line, next to the button rather than in a header or a footer. Somebody
+            * about to punch should be able to see what the punch captures without moving their
+            * eyes off the thing they are about to press.
+            */}
+          <p className="mt-4 border-t border-ink-900/5 pt-3 text-[12.5px] text-ink-500">
+            Your location is captured only at the moment you punch, and only to confirm you are at
+            a work location.
+          </p>
+        </div>
+
+        {/* What happened to the location request, said plainly. */}
+        {geo.kind === 'denied' && (
+          <p
+            role="status"
+            className="mt-4 rounded-lg bg-amber-50 px-3.5 py-2.5 text-[13px] text-amber-900 ring-1 ring-inset ring-amber-200"
+          >
+            <strong className="font-semibold">Location not shared.</strong> Your punch is still
+            recorded — it is just marked unverified, so your manager can see it was not confirmed
+            at an office. You can allow location in your browser&apos;s site settings.
+          </p>
+        )}
+        {geo.kind === 'unavailable' && (
+          <p role="status" className="mt-4 rounded-lg bg-ink-100 px-3.5 py-2.5 text-[13px] text-ink-700">
+            <strong className="font-semibold">{geo.reason}.</strong> The punch is recorded as
+            unverified rather than refused.
+          </p>
+        )}
+
+        {lastResult?.location && (
+          <p
+            role="status"
+            className={`mt-4 rounded-lg px-3.5 py-2.5 text-[13px] ring-1 ring-inset ${
+              lastResult.location.verified
+                ? 'bg-emerald-50 text-emerald-900 ring-emerald-200'
+                : 'bg-amber-50 text-amber-900 ring-amber-200'
+            }`}
+          >
+            {lastResult.location.verified ? (
+              <>
+                <strong className="font-semibold">Location confirmed.</strong>{' '}
+                <span className="num">{lastResult.location.distanceM} m</span> from{' '}
+                {lastResult.location.name} (geofence{' '}
+                <span className="num">{lastResult.location.radiusM} m</span>).
+              </>
+            ) : (
+              <>
+                <strong className="font-semibold">Outside the geofence.</strong> You are{' '}
+                <span className="num">{lastResult.location.distanceM} m</span> from the nearest
+                office, {lastResult.location.name} (geofence{' '}
+                <span className="num">{lastResult.location.radiusM} m</span>). The punch is
+                recorded and flagged, not refused — working off-site is legitimate.
+              </>
+            )}
+          </p>
+        )}
+      </div>
+
+      {/*
+        * Today's punches - the raw facts the day above is derived from.
+        *
+        * Rendered ONLY when there are some. The old version showed an empty-state panel saying
+        * "no punches yet / check in to start the day", which repeated the hero's message and cost
+        * a third of the card's height to do it.
+        */}
+      {d.punches.length > 0 && (
+        <div className="border-t border-ink-100">
+          <p className="px-4 pt-3 text-[12px] font-semibold uppercase tracking-wide text-ink-400 sm:px-5">
+            Today&apos;s punches
+          </p>
+          <ul className="divide-y divide-ink-100">
+            {d.punches.map((p) => (
+              <li
+                key={p.id}
+                className="flex flex-wrap items-center justify-between gap-x-4 gap-y-1 px-4 py-2.5 sm:px-5"
+              >
+                <div className="flex items-center gap-2.5">
+                  <span className={`num inline-flex w-14 justify-center rounded-md px-1.5 py-0.5 text-[12px] font-semibold ring-1 ring-inset ${
+                    p.direction === 'in'
+                      ? 'bg-emerald-50 text-emerald-700 ring-emerald-200'
+                      : 'bg-ink-100 text-ink-600 ring-ink-200'
+                  }`}>
+                    {p.direction === 'in' ? 'IN' : 'OUT'}
+                  </span>
+                  <span className="num text-[13.5px] font-medium text-ink-900">
+                    {clock(p.punched_at)}
+                  </span>
+                  {p.note && <span className="text-[13px] text-ink-500">{p.note}</span>}
+                </div>
+                <div className="flex flex-wrap items-center gap-2 text-[12.5px]">
+                  {p.location_verified ? (
+                    <>
+                      <Badge status="present">verified</Badge>
+                      <span className="num text-ink-500">
+                        {p.location_name} · {p.distance_m} m
+                        {p.accuracy_m !== null && <> · ±{p.accuracy_m} m</>}
+                      </span>
+                    </>
+                  ) : (
+                    <>
+                      <Badge status="pending">
+                        {p.location_source === 'denied' ? 'not shared'
+                          : p.location_source === 'unavailable' ? 'unavailable'
+                            : 'outside geofence'}
+                      </Badge>
+                      {p.distance_m !== null && (
+                        <span className="num text-ink-500">
+                          {p.distance_m} m from {p.location_name ?? 'nearest office'}
+                        </span>
+                      )}
+                    </>
+                  )}
+                </div>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
+      {/*
+        * The retention detail and the office list, behind a disclosure.
+        *
+        * This is the "tell me more" answer, and it was four lines of prose taller than the action
+        * it explained. It is NOT deleted - the transparency was a deliberate decision and the
+        * short version above still states what is captured before you press anything. Native
+        * <details> so it works with no JavaScript and is keyboard-operable for free.
+        */}
+      <details className="group border-t border-ink-100 px-4 py-2.5 sm:px-5">
+        <summary className="cursor-pointer list-none text-[12.5px] font-medium text-ink-500 hover:text-ink-800">
+          <span className="underline decoration-ink-300 underline-offset-2">
+            What is stored, and where
+          </span>
+          <span aria-hidden className="ml-1.5 inline-block transition-transform group-open:rotate-90">
+            ›
+          </span>
+        </summary>
+        <div className="mt-2.5 space-y-1.5 text-[12.5px] leading-relaxed text-ink-500">
+          <p>
+            The time, the office matched, the distance, and whether it was confirmed. Coordinates
+            are kept at reduced precision for 12 months and then removed — the verdict is kept, so
+            your attendance history stays explainable without keeping a location trail.
+          </p>
+          {d.offices.length > 0 && (
+            <p>
+              <span className="font-medium text-ink-700">Work locations:</span>{' '}
+              {d.offices.map((o) => `${o.name} (${o.radius_m} m)`).join(' · ')}
+            </p>
+          )}
+        </div>
+      </details>
+
+      {toast && <Toast message={toast.msg} tone={toast.tone} onDone={() => setToast(null)} />}
+    </Card>
+  );
+}

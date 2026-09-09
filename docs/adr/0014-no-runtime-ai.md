@@ -31,7 +31,31 @@ Three seams are built anyway because they cost almost nothing now:
 
 1. `documents` stores extracted text alongside binaries, so future retrieval does not require reprocessing every historical file
 2. `AuthorizationService.scope()` returns a composable SQL predicate, so any future retrieval filters through **the same** authorization logic rather than a parallel implementation. This is the single control that makes permission-respecting AI possible at all
-3. An `ai` module boundary is reserved and feature-flagged off. AI code is never inline in a domain module
+3. An `ai` module boundary is **reserved for future use** - not created. AI code is never inline in a domain module
+
+> **Amended 2026-09-08 (pre-acceptance) - two wording corrections and one operational bound.**
+>
+> **Seam 3 was written in the present tense and is not built.** `architecture-principles.md`
+> enumerates **ten** bounded contexts with no `ai` among them, and the only feature flag in the
+> database is `feature.work_logging_enabled`. Since an Accepted ADR outranks `ai/context/`, the
+> original wording would have silently invalidated that ten-module list. Reserving a name costs
+> nothing and delivers nothing that would need retrofitting; seams 1 and 2 are the ones that carry
+> real value, and seam 2 (`scope()` returning a composable predicate) is already required by
+> ADR-0005 for reasons unrelated to AI.
+>
+> **The development-time / runtime line needs an operational bound, not only a product one.** The
+> prohibitions below are written as *product* constraints - what the shipped system may not do.
+> They do not, as written, prevent a future operator pointing this development harness at
+> production data: `.claude/settings.json` allow-lists `Bash(psql *)` with no prompt and no
+> scoping by host, database or role. Harmless today (a local dev container with seeded data), and
+> now bounded explicitly:
+>
+> > **The Claude Code harness is a development tool and must never be connected to a production
+> > database, or to any database containing real employee personal data.** That is a constraint on
+> > *operating* this repository, not only on what the product ships.
+>
+> The `db:verify` target guard (DEC-024) is the first mechanical expression of this; it is not
+> sufficient on its own.
 
 Forbidden regardless of any later decision: any AI input to hiring, promotion, compensation, performance rating, discipline or termination; attrition prediction on named individuals; productivity or sentiment scoring; and any AI write path to employee records.
 

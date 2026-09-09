@@ -33,6 +33,26 @@ The only external interfaces are **infrastructure, not applications**: Entra ID 
 
 Other systems on this machine - Hiremate, the Thredd portal, attendance-symphony - are **reference material only**. Copying a *pattern* is encouraged; creating a *coupling* requires a superseding ADR.
 
+> **Context refresh, 2026-09-08 (pre-acceptance).** The Context above describes GreytHR as covering
+> "leave, attendance, salary and documents". `docs/requirements/greythr-current-state.md` records a
+> wider footprint than that: its ESS today also includes **People, Helpdesk, Request Hub and
+> Workflow Delegates**. Replacing it is therefore a materially larger scope than this ADR's
+> framing - "data entry that happens a few times a month" understates the trade for the modules
+> GreytHR already serves daily.
+>
+> **This does not change the decision, and OR-07 does not block it.** Standalone-versus-integrated
+> is an architectural question, already settled by the human (D5); retire-versus-coexist is an
+> operations question about *when* Panasa stops dual-entering, and this ADR already anticipates
+> parallel running. The two can both hold: running alongside GreytHR indefinitely is fully
+> consistent with taking no dependency on it. What the wider footprint changes is the *cost*
+> estimate and the MVP cut line, which belong to OR-07, not here.
+>
+> Verified at review: no integration marker exists anywhere in the repository - no endpoint, no
+> service token, no webhook, no external identifier column in any migration, and the GreytHR
+> reference document carries no credentials. One ambiguity worth noting: `org_setting.category`
+> permits the value `'integration'`. It is unused, and it is ambiguous precisely where this ADR is
+> most sensitive.
+
 ## Consequences
 
 ### Positive

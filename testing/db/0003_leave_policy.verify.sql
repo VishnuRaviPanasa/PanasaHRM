@@ -88,7 +88,7 @@ DECLARE v_ok BOOLEAN := false;
 BEGIN
     BEGIN
         INSERT INTO leave_policy (leave_type_id, valid_from, valid_to)
-        SELECT id, DATE '2020-06-01', DATE '2021-01-01' FROM leave_type WHERE code = 'CL';
+        SELECT id, DATE '2030-06-01', DATE '2031-01-01' FROM leave_type WHERE code = 'CL';
     EXCEPTION WHEN exclusion_violation THEN v_ok := true;
     END;
     IF v_ok THEN RAISE NOTICE 'PASS  L7 overlapping leave policy rejected';
@@ -112,15 +112,15 @@ END $$;
 DO $$
 DECLARE v_old leave_policy; v_new leave_policy;
 BEGIN
-    UPDATE leave_policy SET valid_to = CURRENT_DATE
+    UPDATE leave_policy SET valid_to = fn_business_date()
      WHERE leave_type_id = (SELECT id FROM leave_type WHERE code='CL') AND valid_to IS NULL;
     INSERT INTO leave_policy (leave_type_id, entitlement_days_confirmed,
         entitlement_days_probation, period_cap_days, period_cap_months, valid_from, reason)
-    SELECT id, 15, 6, 6, 6, CURRENT_DATE, 'verification: CL raised to 15'
+    SELECT id, 15, 6, 6, 6, fn_business_date(), 'verification: CL raised to 15'
       FROM leave_type WHERE code = 'CL';
 
     v_old := fn_leave_policy_asof('CL', DATE '2021-06-15');
-    v_new := fn_leave_policy_asof('CL', CURRENT_DATE);
+    v_new := fn_leave_policy_asof('CL', fn_business_date());
     IF v_old.entitlement_days_confirmed = 12 AND v_new.entitlement_days_confirmed = 15 THEN
         RAISE NOTICE 'PASS  L9 history intact: 2021 sees 12 days, today sees 15';
     ELSE
@@ -129,10 +129,8 @@ BEGIN
     END IF;
 END $$;
 
--- restore
-DELETE FROM leave_policy WHERE reason LIKE 'verification:%';
-UPDATE leave_policy SET valid_to = NULL
- WHERE valid_from = DATE '2020-01-01'
-   AND leave_type_id = (SELECT id FROM leave_type WHERE code = 'CL');
+-- No restore block - removed 2026-09-08. Rollback makes it redundant (DEC-024), and re-opening
+-- a closed period is now blocked by migration 0004 (Must-Know Rule 3). See the fuller note in
+-- 0002_configuration.verify.sql.
 
 SELECT 'LEAVE POLICY VERIFICATION COMPLETE' AS result;

@@ -2,10 +2,31 @@
 
 ## Status
 
-Proposed
+Proposed - **BLOCKED, do not accept**
 
 > Only a human may set this to Accepted. Once Accepted this file is immutable and
 > `.claude/hooks/guard-adr.mjs` will refuse edits - supersede it with a new ADR instead.
+
+> **BLOCKED by an unresolved product decision (human decision, 2026-09-08).**
+>
+> This ADR must not be accepted or finalised until **plan question Q10** is resolved: *is payroll
+> built here, or bought/integrated from an existing provider?*
+>
+> The blocker is live rather than hypothetical. **OR-07** records that GreytHR's ESS already
+> includes Salary, and `docs/requirements/organization-and-lifecycle.md` already assumes a payroll
+> hand-off. This ADR is not merely *early* - its premise may turn out to be false.
+>
+> **If Q10 resolves to "buy/integrate", the correct outcome is to retire or void this ADR, not to
+> amend it.** A rules engine that is never built should not sit Accepted at the top of the
+> authority order describing a module that does not exist. In that case the replacement decision
+> is an integration boundary (and, under ADR-0018, one that must not become a coupling without
+> its own ADR).
+>
+> **If Q10 resolves to "build"**, this ADR still requires the substantive amendments identified in
+> `docs/adr/adr-review-report.md` §9 before acceptance - principally: a precise definition of
+> "as of" for rule resolution, a money type and a rounding policy that is *part of the versioned
+> rule*, a statement of engine expressiveness sufficient to express formula changes rather than
+> only rate changes, and an explicit path for retrospectively-notified rates and arrears.
 
 ## Date
 
@@ -47,4 +68,15 @@ No country-specific logic sits in the payroll core. India is the first implement
 
 ## Reconsider when
 
-Never. The regulatory environment is the reason this exists, and it is not stabilising.
+**Immediately, on the resolution of Q10** (build payroll versus buy/integrate). Until that question
+is answered this decision has an unresolved premise, and `Never` cannot honestly be recorded as the
+reconsideration trigger - which is why it no longer is.
+
+- **Q10 → buy/integrate:** retire or void this ADR. Do not amend it into an integration decision;
+  the decision recorded here would not be the decision taken.
+- **Q10 → build:** the trigger below becomes the operative one, and this clause is superseded by
+  the accepted version of this ADR.
+
+*Original text, retained so the intent is not lost:* "Never. The regulatory environment is the
+reason this exists, and it is not stabilising." That reasoning holds **conditionally on payroll
+being built here**, and only then.

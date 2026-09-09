@@ -1,0 +1,560 @@
+# =============================================================================
+# authz-matrix.yaml - the authorization test ORACLE
+# =============================================================================
+#
+# CLAUDE.md's Forbidden Actions bar "adding a route without a corresponding authz-matrix.yaml
+# entry". This is that file, and until it existed no new route could be added compliantly.
+#
+# WHAT THIS IS NOT: it is not the runtime policy. ADR-0005 chose declarative TypeScript for
+# policy definition, and that lives in `src/policies.ts`. If this file merely restated the code
+# it would test nothing - a bug would be copied into both. It is written INDEPENDENTLY, by
+# reading the requirements rather than the implementation, so a disagreement between the two is
+# a real finding.
+#
+# CELL SEMANTICS - and `deny` is the load-bearing one:
+#
+#   allow        the role is permitted for at least one target, and no per-target condition
+#                narrows it beyond the row scope
+#   conditional  permitted for some targets and refused for others (self-only, direct-report
+#                only, project-lead only, or a deny-override that can fire)
+#   deny         NEVER permitted, for ANY target, whatever else the actor holds
+#
+# The generated test asserts BOTH directions per ADR-0005: an `allow`/`conditional` cell must
+# actually admit something, and a `deny` cell must admit nothing. A one-directional matrix
+# catches under-permitting (which users report) and misses over-permitting (which they do not).
+#
+# Roles mirror ck_user_role_value in migration 0016. Roles are ADDITIVE - `user_role` is
+# multi-valued - so a cell describes the role in isolation and the deny-overrides are what stop
+# a second role widening the first.
+
+roles: [employee, manager, hr_admin, hr_ops, finance, auditor]
+
+# -----------------------------------------------------------------------------
+# The named negative cases from ai/context/rbac-rules.md.
+#
+# Each pins a specific threat rather than being representative. The fixture:
+#
+#   CEO - DeptHeadA - ManagerM1 - {E1, E2}    HR Admin, HR Ops, Finance, Auditor
+#       - DeptHeadB - ManagerM2 - {E3}        Terminated T1 (was M1's report)
+#                                             Transferred X1 (M1 -> M2)
+#   ProjectP1: lead M2, contributors {E1, E3}
+#   ProjectP2: lead M1, contributor E3
+# -----------------------------------------------------------------------------
+negative_cases:
+  - id: payslip-cross-employee
+    pins: An employee must not read another employee's payslip. The first thing anybody tries.
+    actor: E1
+    action: payroll.payslip.read
+    target: E2
+    expect: deny
+
+  - id: payslip-manager-cannot-read-report
+    pins: >
+      A line manager reads their subtree's attendance and work logs but NOT their pay. This is the
+      one resource where the reporting graph does not apply at all - a manager needs to know
+      whether somebody was at work, not what they were paid, and DEC-049 already denied managers
+      documents on the same reasoning.
+    actor: M1
+    action: payroll.payslip.read
+    target: E1
+    expect: deny
+
+  - id: payslip-upward-escalation
+    pins: >
+      THE COMPENSATION RULE rbac-rules.md states explicitly: never your own manager's salary. An
+      hr_admin who is also somebody's report must not read the payslip of somebody above them in
+      their own reporting line, and holding hr_admin must not re-open it - which is why
+      isAncestorOfActor is a deny-override rather than an omission from the allow list.
+    actor: M1_also_hr_admin
+    action: payroll.payslip.read
+    target: DeptHeadA
+    expect: deny
+
+  - id: payslip-employee-cannot-manage
+    pins: An employee cannot create, edit, attach to, issue or void a payslip - including their own.
+    actor: E1
+    action: payroll.payslip.manage
+    target: E1
+    expect: deny
+
+  - id: payslip-hr-ops-denied
+    pins: >
+      hr_ops holds every other HR resource unconditionally (DEC-041) and is denied pay. The
+      salary register is need-to-know; `finance` exists because payroll is a separate function.
+    actor: HR_OPS
+    action: payroll.payslip.read
+    target: E1
+    expect: deny
+
+  - id: payslip-auditor-denied
+    pins: >
+      An auditor's legitimate need is the audit TRAIL, and fn_audit_payslip records who read whose
+      payslip without recording any amount - so the trail answers the audit question without
+      becoming a second, decade-retained salary register.
+    actor: AUDITOR
+    action: payroll.payslip.read
+    target: E1
+    expect: deny
+
+  - id: payslip-self-is-permitted
+    pins: >
+      The counterweight to the six denials above. A wage slip is something the person paid is
+      entitled to see; if this flips to deny the employee-facing screen is dead and the denials
+      above would still all pass.
+    actor: E1
+    action: payroll.payslip.read
+    target: E1
+    expect: allow
+
+  - id: upward-escalation
+    pins: A manager must not read their own chain of command
+    actor: M1
+    action: people.employee.personal.read
+    target: DeptHeadA
+    expect: deny
+
+  - id: upward-escalation-via-second-role
+    pins: >
+      Holding hr_admin as well must NOT re-open the manager's own chain of command. This is why
+      isAncestorOfActor is a deny-override rather than an omission from the allow list.
+    actor: M1_also_hr_admin
+    action: people.employee.personal.read
+    target: DeptHeadA
+    expect: deny
+
+  - id: lateral-escalation
+    pins: A manager must not read somebody who is not their report
+    actor: M1
+    action: people.employee.personal.read
+    target: E3
+    expect: deny
+
+  - id: temporal-decay-termination
+    pins: >
+      A manager loses access to a former report's records for periods after the reporting line
+      ended. The reporting graph resolves as of the RECORD's date (temporal-data-rules rule 4).
+    actor: M1
+    action: attendance.day.read
+    target: T1
+    as_of: after_termination
+    expect: deny
+
+  - id: temporal-decay-transfer
+    pins: A manager loses access after the report transfers away
+    actor: M1
+    action: attendance.day.read
+    target: X1
+    as_of: after_transfer
+    expect: deny
+
+  - id: temporal-retention-before-transfer
+    pins: >
+      The other direction, and it must NOT be broken while fixing the one above - a manager who
+      DID manage somebody in March keeps access to March.
+    actor: M1
+    action: attendance.day.read
+    target: X1
+    as_of: before_transfer
+    expect: allow
+
+  - id: peer-idor
+    pins: One employee must not read another's record, and must get 404 rather than 403
+    actor: E1
+    action: people.employee.personal.read
+    target: E2
+    expect: deny
+    expect_status: 404
+
+  - id: cross-graph-leak
+    pins: >
+      Project membership must not widen into HR data. M2 leads ProjectP1 which E1 contributes to;
+      that gives M2 nothing about E1's leave.
+    actor: M2
+    action: leave.balance.read
+    target: E1
+    expect: deny
+
+  - id: project-scope-does-not-widen
+    pins: A project lead sees effort on THEIR project, not on another they have no role on
+    actor: M2
+    action: work.project_effort.read
+    target_project: P2
+    expect: deny
+
+  - id: reporting-scope-does-not-widen
+    pins: >
+      A reporting line must not confer a project view. M1 manages E1, and E1 works on P1, but M1
+      has no role on P1.
+    actor: M1
+    action: work.project_effort.read
+    target_project: P1
+    expect: deny
+
+  - id: no-self-approval-leave
+    pins: Nobody approves their own leave, even holding hr_admin
+    actor: M1_also_hr_admin
+    action: leave.request.approve
+    target: M1_also_hr_admin
+    expect: deny
+
+  - id: no-self-lifecycle-transition
+    pins: Nobody records their own promotion, confirmation or exit
+    actor: HR_ADMIN
+    action: people.lifecycle.transition
+    target: HR_ADMIN
+    expect: deny
+
+  - id: break-glass-cannot-grant-privilege
+    pins: >
+      A break-glass credential exists to restore access during an Entra outage. Letting it hand
+      out roles would make it a deliberate privilege-escalation primitive.
+    actor: BREAK_GLASS
+    action: identity.role.grant
+    target: E1
+    expect: deny
+
+# -----------------------------------------------------------------------------
+# The full (role x action) matrix
+# -----------------------------------------------------------------------------
+# Why HR is `allow` on operational reads but `conditional` on personal detail:
+#   rbac-rules.md's deny-override example is scoped to COMPENSATION - "a manager who is also an
+#   HR admin still cannot see their own manager's salary". Leave, attendance and work logs are
+#   ordinary HR processing, so hr_admin/hr_ops read them unconditionally. Personal detail,
+#   lifecycle and employee.update DO carry `is_ancestor_of_actor`, so HR cannot read up its own
+#   chain of command there - which is why those cells stay `conditional`.
+#   The matrix originally said `conditional` for all of them; the generated suite caught the
+#   disagreement with the policy, which is exactly what an independent oracle is for.
+
+actions:
+
+  # ---- identity ---------------------------------------------------------
+  identity.session.read:
+    graph: self
+    cells: { employee: conditional, manager: conditional, hr_admin: conditional, hr_ops: deny, finance: deny, auditor: deny }
+
+  identity.role.grant:
+    graph: organisation
+    deny_overrides: [is_break_glass]
+    cells: { employee: deny, manager: deny, hr_admin: allow, hr_ops: deny, finance: deny, auditor: deny }
+
+  identity.role.revoke:
+    graph: organisation
+    deny_overrides: [is_break_glass]
+    cells: { employee: deny, manager: deny, hr_admin: allow, hr_ops: deny, finance: deny, auditor: deny }
+
+  identity.link.create:
+    graph: organisation
+    note: ADR-0009 - a federated identity link is an administrative act, never created by a login
+    deny_overrides: [is_break_glass]
+    cells: { employee: deny, manager: deny, hr_admin: allow, hr_ops: deny, finance: deny, auditor: deny }
+
+  identity.session.revoke:
+    graph: organisation
+    deny_overrides: [is_break_glass]
+    cells: { employee: deny, manager: deny, hr_admin: allow, hr_ops: deny, finance: deny, auditor: deny }
+
+  # ---- people -----------------------------------------------------------
+  people.employee.read:
+    graph: reporting
+    note: >
+      The directory is PUBLIC_INTERNAL, so the ROW scope is open and the FIELD MASK is what keeps
+      personal data out of it. Two separate concerns - conflating them is how either the
+      directory breaks or the address leaks.
+    cells: { employee: allow, manager: allow, hr_admin: allow, hr_ops: allow, finance: deny, auditor: deny }
+
+  people.employee.list:
+    graph: reporting
+    cells: { employee: allow, manager: allow, hr_admin: allow, hr_ops: allow, finance: deny, auditor: deny }
+
+  people.employee.personal.read:
+    graph: reporting
+    note: Manager reach is DIRECT REPORTS ONLY here, never the subtree (rbac-rules asymmetry)
+    deny_overrides: [is_ancestor_of_actor, is_break_glass]
+    cells: { employee: conditional, manager: conditional, hr_admin: conditional, hr_ops: conditional, finance: deny, auditor: deny }
+
+  people.employee.create:
+    graph: organisation
+    cells: { employee: deny, manager: deny, hr_admin: allow, hr_ops: allow, finance: deny, auditor: deny }
+
+  people.employee.update:
+    graph: reporting
+    deny_overrides: [is_ancestor_of_actor]
+    cells: { employee: conditional, manager: conditional, hr_admin: conditional, hr_ops: conditional, finance: deny, auditor: deny }
+
+  people.lifecycle.read:
+    graph: reporting
+    deny_overrides: [is_ancestor_of_actor]
+    cells: { employee: conditional, manager: conditional, hr_admin: conditional, hr_ops: conditional, finance: deny, auditor: deny }
+
+  people.lifecycle.transition:
+    graph: organisation
+    note: HR act, not a manager's - a promotion recorded by the promoting manager has no independent check
+    deny_overrides: [is_self, is_break_glass]
+    cells: { employee: deny, manager: deny, hr_admin: conditional, hr_ops: conditional, finance: deny, auditor: deny }
+
+  people.assignment.change:
+    graph: organisation
+    deny_overrides: [is_self, is_break_glass]
+    cells: { employee: deny, manager: deny, hr_admin: conditional, hr_ops: conditional, finance: deny, auditor: deny }
+
+  # ---- leave ------------------------------------------------------------
+  leave.balance.read:
+    graph: reporting
+    cells: { employee: conditional, manager: conditional, hr_admin: allow, hr_ops: allow, finance: deny, auditor: deny }
+
+  leave.request.read:
+    graph: reporting
+    cells: { employee: conditional, manager: conditional, hr_admin: allow, hr_ops: allow, finance: deny, auditor: deny }
+
+  leave.request.create:
+    graph: self
+    cells: { employee: conditional, manager: conditional, hr_admin: conditional, hr_ops: deny, finance: deny, auditor: deny }
+
+  leave.request.cancel:
+    graph: self
+    cells: { employee: conditional, manager: conditional, hr_admin: conditional, hr_ops: deny, finance: deny, auditor: deny }
+
+  leave.request.approve:
+    graph: reporting
+    note: Also enforced by CHECK in the database - this is the second layer, not the only one
+    deny_overrides: [is_self, is_break_glass]
+    cells: { employee: deny, manager: conditional, hr_admin: conditional, hr_ops: conditional, finance: deny, auditor: deny }
+
+  # ---- attendance -------------------------------------------------------
+  attendance.day.read:
+    graph: reporting
+    note: Whole SUBTREE for a manager - operational data, unlike personal detail
+    cells: { employee: conditional, manager: conditional, hr_admin: allow, hr_ops: allow, finance: deny, auditor: deny }
+
+  attendance.punch.read:
+    graph: reporting
+    note: Punches carry SENSITIVE location data (data-inventory.md)
+    cells: { employee: conditional, manager: conditional, hr_admin: allow, hr_ops: allow, finance: deny, auditor: deny }
+
+  attendance.punch.create:
+    graph: self
+    cells: { employee: conditional, manager: conditional, hr_admin: conditional, hr_ops: deny, finance: deny, auditor: deny }
+
+  # ---- work -------------------------------------------------------------
+  # Written from the requirement, not from the policy.
+  #
+  # A payslip is readable by the person it is about (a wage slip is theirs), by hr_admin and by
+  # finance - and by NOBODY else, including a line manager, hr_ops and auditor. `conditional` for
+  # hr_admin and finance rather than `allow` because the ancestor deny-override applies: neither
+  # may read the payslip of somebody above them in their own reporting line, which is the
+  # compensation rule rbac-rules.md states explicitly.
+  payroll.payslip.read:
+    graph: self
+    cells: { employee: conditional, manager: conditional, hr_admin: conditional, hr_ops: deny, finance: conditional, auditor: deny }
+
+  # Managing is hr_admin only, and conditional even then: not for your own chain of command, and
+  # never for yourself (no self-issue).
+  payroll.payslip.manage:
+    graph: organisation
+    cells: { employee: deny, manager: deny, hr_admin: conditional, hr_ops: deny, finance: deny, auditor: deny }
+
+  work.log.read:
+    graph: reporting
+    cells: { employee: conditional, manager: conditional, hr_admin: allow, hr_ops: allow, finance: deny, auditor: deny }
+
+  # Written from the requirement, not copied from the policy: a task assigned to a person is a
+  # fact about that person, so it follows the same rule as their work log - self, subtree for a
+  # manager, unconditional for HR (DEC-041: task status is operational data, not personal data).
+  # finance and auditor hold no work grant at all.
+  work.task.read:
+    graph: reporting
+    cells: { employee: conditional, manager: conditional, hr_admin: allow, hr_ops: allow, finance: deny, auditor: deny }
+
+  work.log.write:
+    graph: self
+    cells: { employee: conditional, manager: conditional, hr_admin: conditional, hr_ops: deny, finance: deny, auditor: deny }
+
+  work.timesheet.read:
+    graph: reporting
+    cells: { employee: conditional, manager: conditional, hr_admin: allow, hr_ops: allow, finance: deny, auditor: deny }
+
+  work.timesheet.submit:
+    graph: self
+    cells: { employee: conditional, manager: conditional, hr_admin: conditional, hr_ops: deny, finance: deny, auditor: deny }
+
+  work.timesheet.approve:
+    graph: reporting
+    deny_overrides: [is_self, is_break_glass]
+    cells: { employee: deny, manager: conditional, hr_admin: conditional, hr_ops: deny, finance: deny, auditor: deny }
+
+  work.team_effort.read:
+    graph: reporting
+    note: Effort of MY reports, aggregated. Does NOT widen to their projects.
+    cells: { employee: deny, manager: allow, hr_admin: allow, hr_ops: allow, finance: deny, auditor: deny }
+
+  work.project_effort.read:
+    graph: project
+    note: >
+      PROJECT graph. Requires lead/project_manager membership, not a reporting line. This is the
+      cell that pins "reporting scope does not widen".
+    cells: { employee: conditional, manager: conditional, hr_admin: allow, hr_ops: deny, finance: deny, auditor: deny }
+
+  work.project.read:
+    graph: project
+    cells: { employee: conditional, manager: conditional, hr_admin: allow, hr_ops: allow, finance: deny, auditor: deny }
+
+  work.project.manage:
+    graph: organisation
+    cells: { employee: deny, manager: conditional, hr_admin: allow, hr_ops: deny, finance: deny, auditor: deny }
+
+  # ---- documents --------------------------------------------------------
+  # THE UNUSUAL ONE: a line manager gets NOTHING here, unlike every other reporting-graph
+  # resource. A manager has no business reading a report's Aadhaar, bank proof or medical
+  # certificate; document handling is an HR function, and the manager's legitimate interest is
+  # already served by attendance and leave. The `manager: conditional` cells below are for the
+  # manager acting as the SUBJECT of their own documents, not over their reports.
+  #
+  # RESTRICTED types (offer letter, contract, appraisal, disciplinary) are hr_admin only and are
+  # NOT visible to the subject - see OR-25, which records that as an HR/legal question.
+  documents.document.list:
+    graph: reporting
+    deny_overrides: [is_break_glass]
+    cells: { employee: conditional, manager: conditional, hr_admin: allow, hr_ops: conditional, finance: deny, auditor: deny }
+
+  documents.document.read:
+    graph: reporting
+    deny_overrides: [is_break_glass]
+    cells: { employee: conditional, manager: conditional, hr_admin: allow, hr_ops: conditional, finance: deny, auditor: deny }
+
+  documents.document.download:
+    graph: reporting
+    note: >
+      Every call carries an audit_read obligation. A document read IS the disclosure, unlike most
+      reads where the disclosure is field values a mask already governs - so the individual
+      access has to be recorded for a bulk export to be noticeable at all.
+    deny_overrides: [is_break_glass]
+    cells: { employee: conditional, manager: conditional, hr_admin: allow, hr_ops: conditional, finance: deny, auditor: deny }
+
+  documents.document.upload:
+    graph: reporting
+    deny_overrides: [is_break_glass]
+    cells: { employee: conditional, manager: conditional, hr_admin: allow, hr_ops: allow, finance: deny, auditor: deny }
+
+  documents.document.withdraw:
+    graph: organisation
+    note: An employee must not be able to withdraw a document HR relies on.
+    deny_overrides: [is_break_glass]
+    cells: { employee: deny, manager: deny, hr_admin: allow, hr_ops: allow, finance: deny, auditor: deny }
+
+  documents.document.scan:
+    graph: organisation
+    note: >
+      The uploader must never declare their own upload clean - that would make the quarantine
+      gate self-certifying.
+    deny_overrides: [is_break_glass]
+    cells: { employee: deny, manager: deny, hr_admin: allow, hr_ops: allow, finance: deny, auditor: deny }
+
+  # ---- organization -----------------------------------------------------
+  # NOTE the contrast with `config.*` below. ADR-0005(a) makes reading a POLICY row a privilege
+  # and names the tables it means; the org CHART is not among them. It is PUBLIC_INTERNAL
+  # structure like the employee directory, so the row scope is open and the field mask does the
+  # withholding - the same division of labour as people.employee.read.
+  org.unit.read:
+    graph: organisation
+    cells: { employee: allow, manager: allow, hr_admin: allow, hr_ops: allow, finance: allow, auditor: allow }
+
+  org.team.read:
+    graph: organisation
+    cells: { employee: allow, manager: allow, hr_admin: allow, hr_ops: allow, finance: allow, auditor: allow }
+
+  # Same cells as org.unit.manage and a SEPARATE action on purpose: retiring a designation closes
+  # it to every future hire in the organisation, which is a different blast radius from
+  # re-parenting one department. Written from the requirement, not copied from the policy.
+  org.designation.manage:
+    graph: organisation
+    deny_overrides: [is_break_glass]
+    cells: { employee: deny, manager: deny, hr_admin: allow, hr_ops: allow, finance: deny, auditor: deny }
+
+  org.unit.manage:
+    graph: organisation
+    note: >
+      Reorganising is an HR act. A department head re-parenting their own department would have
+      no independent check anywhere - the same reasoning that keeps lifecycle transitions out of
+      a manager's hands.
+    deny_overrides: [is_break_glass]
+    cells: { employee: deny, manager: deny, hr_admin: allow, hr_ops: allow, finance: deny, auditor: deny }
+
+  org.team.manage:
+    graph: organisation
+    deny_overrides: [is_break_glass]
+    cells: { employee: deny, manager: deny, hr_admin: allow, hr_ops: allow, finance: deny, auditor: deny }
+
+  org.team.member.manage:
+    graph: organisation
+    note: >
+      Deliberately HR-only. Team membership is NOT a scope graph (migration 0017 asserts this),
+      so there is no principled way to let "the team's lead" manage it without inventing a third
+      graph, which ADR-0005 would have to sanction.
+    deny_overrides: [is_break_glass]
+    cells: { employee: deny, manager: deny, hr_admin: allow, hr_ops: allow, finance: deny, auditor: deny }
+
+  # ---- configuration ----------------------------------------------------
+  config.policy.read:
+    graph: organisation
+    note: >
+      ADR-0005(a) - a policy row is a historical derivation input and reading one is a privilege.
+      There is no implicit "everyone can read configuration". This governs EXPOSING a row through
+      an endpoint; the leave engine deriving an entitlement internally is not an actor read.
+    cells: { employee: deny, manager: deny, hr_admin: allow, hr_ops: allow, finance: deny, auditor: allow }
+
+  config.setting.read:
+    graph: organisation
+    cells: { employee: deny, manager: deny, hr_admin: allow, hr_ops: allow, finance: deny, auditor: allow }
+
+  config.policy.write:
+    graph: organisation
+    note: Writing policy changes what every historical date resolves to, for everybody
+    deny_overrides: [is_break_glass]
+    cells: { employee: deny, manager: deny, hr_admin: allow, hr_ops: deny, finance: deny, auditor: deny }
+
+  config.setting.write:
+    graph: organisation
+    deny_overrides: [is_break_glass]
+    cells: { employee: deny, manager: deny, hr_admin: allow, hr_ops: deny, finance: deny, auditor: deny }
+
+  # ---- audit ------------------------------------------------------------
+  audit.event.read:
+    graph: organisation
+    cells: { employee: deny, manager: deny, hr_admin: allow, hr_ops: deny, finance: deny, auditor: allow }
+
+# -----------------------------------------------------------------------------
+# Known divergences from ai/context/rbac-rules.md, stated rather than silently resolved
+# -----------------------------------------------------------------------------
+divergences:
+  - id: no-compensation-actions
+    detail: >
+      rbac-rules.md writes policy for employee.compensation.read, bank details and government
+      IDs. No such table exists. Defining actions for resources that do not exist would create a
+      fabricated standard the next session treats as authoritative, so they are omitted. The
+      default-deny field registry keeps such columns invisible when they do land.
+
+  - id: action-separator
+    detail: >
+      rbac-rules.md uses `employee.compensation.read` while ADR-0016 uses
+      `work.effort_cost:read`. All-dots wins here; ADR-0016 is still Proposed so its text should
+      be amended rather than worked around. Recorded as a DEC.
+
+  - id: project-graph-has-no-temporal-decay
+    detail: >
+      rbac-rules.md asserts project_member is effective-dated. The committed table has only
+      created_at and UNIQUE (project_id, employee_id), so a removed member either keeps access
+      forever or loses their own history. The project-graph negative cases are therefore verified
+      against membership only, NOT against time. Tracked as OR-17 and needs a migration.
+
+  - id: reporting-tables-do-not-exist
+    detail: >
+      rbac-rules.md names reporting_relationship and reporting_closure_current. Neither exists;
+      employment.manager_id with its effective-dated valid_period is the real edge, resolved by
+      fn_reporting_subtree_asof. DEC-032.
+  - id: team-membership-is-not-a-scope-graph
+    detail: >
+      Migration 0017 adds team_membership, effective-dated. It is deliberately NOT wired into
+      authorization: ADR-0005 has exactly two scope graphs and rbac-rules.md is explicit that
+      merging graphs is how a project lead ends up reading a disciplinary file. Team management
+      is therefore HR-only rather than lead-delegated, and 0017's check G18 fails if any team
+      function starts reading user_role.
