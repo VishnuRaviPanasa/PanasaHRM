@@ -80,6 +80,21 @@ export const ACTIONS = {
    */
   'work.task.read':               { resource: 'task',           graph: 'reporting' },
   'work.log.write':               { resource: 'work_log',       graph: 'self' },
+  /*
+   * HR RECORDING EFFORT FOR SOMEBODY ELSE, which `work.log.write` cannot express.
+   *
+   * That action is graph `self`, so hr_admin's cell reads `conditional` and resolves to "HR may
+   * write HR's own work log" - correct, and the reason HR could not enter a work log for an
+   * employee at all. Widening it was not an option: `self` is what stops an employee writing
+   * into a colleague's timesheet, and every cell in that row depends on it.
+   *
+   * So this is a separate action on the ORGANISATION graph. Effort recorded through it carries
+   * `entry_source = 'hr_entry'` and the recorder's id (migration 0028), so an approver can always
+   * see that HR filled the line in rather than the employee. The database refuses the incoherent
+   * combinations independently of this action - `hr_entry` naming the subject themselves is a
+   * trigger violation - so the policy and the schema each stop a different half of the problem.
+   */
+  'work.log.write_for':           { resource: 'work_log',       graph: 'organisation' },
   'work.timesheet.read':          { resource: 'timesheet',      graph: 'reporting' },
   'work.timesheet.submit':        { resource: 'timesheet',      graph: 'self' },
   /** Line-manager act: approving the timesheet of somebody who reports to you. */
@@ -90,6 +105,15 @@ export const ACTIONS = {
   'work.project_effort.read':     { resource: 'project_effort', graph: 'project' },
   'work.project.read':            { resource: 'project',        graph: 'project' },
   'work.project.manage':          { resource: 'project',        graph: 'organisation' },
+  /*
+   * The task and sub-task master list. HR-only, deliberately narrower than
+   * `work.project.manage` - which also admits a project lead, and keeps doing so for the project
+   * and sub-project levels. Retiring a task changes what every member of that project may log
+   * effort against, so it is an HR master-data act rather than a project-management one. If a
+   * lead needs it later that is a policy change with its own matrix row and its own tests, not a
+   * quiet widening of this one.
+   */
+  'work.task.manage':             { resource: 'task',           graph: 'organisation' },
 
   // ---- documents ----------------------------------------------------------
   // Documents are governed by the REPORTING graph for row scope but, unusually, a line manager

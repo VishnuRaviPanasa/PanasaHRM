@@ -426,6 +426,24 @@ definePolicy({
   scope: (ctx) => selfOnly('work_log', ctx.employeeId),
 });
 
+/**
+ * HR recording effort on an employee's behalf.
+ *
+ * Only hr_admin, and deliberately not `manager`. A line manager approving a timesheet and a line
+ * manager AUTHORING it are different acts - the second removes the employee from their own
+ * record, and an approval of something you wrote yourself is not an approval. Nothing in the
+ * requirement asked for it, so it is not granted here; the reporting graph is ready if it ever is.
+ *
+ * The provenance rail in migration 0028 is the other half of this: whatever this policy admits,
+ * the row still has to say who recorded it, and `hr_entry` naming the subject themselves is
+ * refused by the database regardless of what any caller claims.
+ */
+definePolicy({
+  action: 'work.log.write_for',
+  allow: [{ role: 'hr_admin', when: always }],
+  scope: (ctx) => (ctx.roles.includes('hr_admin') ? ALLOW_ALL : selfOnly('work_log', ctx.employeeId)),
+});
+
 definePolicy({
   action: 'work.timesheet.read',
   allow: [
@@ -505,6 +523,19 @@ definePolicy({
     ctx.roles.includes('hr_admin') || ctx.roles.includes('hr_ops')
       ? ALLOW_ALL
       : projectMembership(ref.type, ctx.employeeId, { asOf: ref.asOf ?? today() }),
+});
+
+/**
+ * The task and sub-task master list. HR-only; see the note on the action.
+ *
+ * `scope` falls back to deny-all rather than to something self-shaped, because there is no
+ * "my own tasks" reading of a MASTER-DATA write. A non-HR caller reaching here is a bug, and
+ * deny-all renders as literal `false` so a careless caller gets no rows rather than all of them.
+ */
+definePolicy({
+  action: 'work.task.manage',
+  allow: [{ role: 'hr_admin', when: always }],
+  scope: (ctx) => (ctx.roles.includes('hr_admin') ? ALLOW_ALL : DENY_ALL),
 });
 
 definePolicy({

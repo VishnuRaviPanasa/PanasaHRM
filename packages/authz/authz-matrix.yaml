@@ -369,6 +369,14 @@ actions:
     graph: self
     cells: { employee: conditional, manager: conditional, hr_admin: conditional, hr_ops: deny, finance: deny, auditor: deny }
 
+  # HR recording effort for somebody else. `work.log.write` above is graph `self`, so hr_admin's
+  # cell there means "HR's own work log" - which is why HR could not enter a log for an employee.
+  # manager is DENY on purpose: authoring a timesheet and approving it are different acts, and an
+  # approval of something you wrote yourself is not an approval.
+  work.log.write_for:
+    graph: organisation
+    cells: { employee: deny, manager: deny, hr_admin: allow, hr_ops: deny, finance: deny, auditor: deny }
+
   work.timesheet.read:
     graph: reporting
     cells: { employee: conditional, manager: conditional, hr_admin: allow, hr_ops: allow, finance: deny, auditor: deny }
@@ -401,6 +409,13 @@ actions:
   work.project.manage:
     graph: organisation
     cells: { employee: deny, manager: conditional, hr_admin: allow, hr_ops: deny, finance: deny, auditor: deny }
+
+  # The task and sub-task master list. Narrower than work.project.manage above, which also admits
+  # a project lead: retiring a task changes what every member of that project may log effort
+  # against, so it is an HR act. hr_ops is deny - it manages people records, not work structure.
+  work.task.manage:
+    graph: organisation
+    cells: { employee: deny, manager: deny, hr_admin: allow, hr_ops: deny, finance: deny, auditor: deny }
 
   # ---- documents --------------------------------------------------------
   # THE UNUSUAL ONE: a line manager gets NOTHING here, unlike every other reporting-graph
