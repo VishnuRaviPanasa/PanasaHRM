@@ -46,7 +46,9 @@
     "period:test": "node testing/demo/period-filters.test.mjs",
     "i18n:test": "node testing/demo/i18n.test.mjs",
     "bizdate:test": "node testing/demo/business-date.test.mjs",
-    "browser:test": "node testing/demo/browser-verify.mjs"
+    "browser:test": "node testing/demo/browser-verify.mjs",
+    "accounts:test": "node testing/demo/accounts.test.mjs",
+    "onboarding:test": "node testing/demo/onboarding.test.mjs"
   },
   "devDependencies": {
     "prettier": "^3.3.3",

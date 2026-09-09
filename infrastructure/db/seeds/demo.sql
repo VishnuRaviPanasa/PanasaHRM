@@ -74,6 +74,15 @@ DELETE FROM user_role;
 ALTER TABLE user_role ENABLE ALWAYS TRIGGER tg_user_role_immutable_history;
 
 DELETE FROM session;
+
+-- user_activation (migration 0029) references app_user TWICE - once for whose account it is, and
+-- once for who issued it - so it has to go before app_user or the delete below fails on
+-- `user_activation_issued_by_user_id_fkey`. Missing this broke `db:seed` outright the moment any
+-- activation code had ever been issued, which is to say it broke `punch:test` and `demo:test`
+-- (both re-seed) while every other suite stayed green. The rows are ordinary DELETEs: the table's
+-- rails forbid MUTATING a token, not clearing the table.
+DELETE FROM user_activation;
+
 DELETE FROM app_user;
 
 -- leave_ledger and leave_account are append-only, and their rails are ENABLE ALWAYS, so
@@ -145,6 +154,29 @@ DELETE FROM team;
 ALTER TABLE employment DISABLE TRIGGER tg_employment_immutable_history;
 DELETE FROM employment;
 ALTER TABLE employment ENABLE ALWAYS TRIGGER tg_employment_immutable_history;
+
+-- ---------------------------------------------------------------------------
+-- THE RULE THIS FILE KEEPS LEARNING: a new table that references `employee` or `app_user` is not
+-- finished until THIS teardown knows about it.
+--
+-- It has now been missed twice in one day - `user_activation` (0029) and the annexure tables
+-- (0032) - and both times fifteen suites stayed green while `punch:test` and `demo:test` failed,
+-- because those two are the only ones that re-seed. Both failures were invisible until somebody
+-- had actually used the feature, since an empty table breaks nothing.
+--
+-- The annexure needs its rails stood down first, the same way `user_role` and `employment` above
+-- do: the event log is append-only and the components refuse any write once their annexure has
+-- left draft. Order matters - events and components both point at the annexure.
+-- ---------------------------------------------------------------------------
+ALTER TABLE salary_annexure_event DISABLE TRIGGER trg_sae_append_only;
+DELETE FROM salary_annexure_event;
+ALTER TABLE salary_annexure_event ENABLE ALWAYS TRIGGER trg_sae_append_only;
+
+ALTER TABLE salary_annexure_component DISABLE TRIGGER trg_sac_draft_only;
+DELETE FROM salary_annexure_component;
+ALTER TABLE salary_annexure_component ENABLE ALWAYS TRIGGER trg_sac_draft_only;
+
+DELETE FROM salary_annexure;
 
 DELETE FROM employee;
 DELETE FROM designation;
@@ -224,7 +256,30 @@ INSERT INTO employee (employee_number, full_name, work_email, personal_phone, ge
   ('EMP002','Priya Menon',  'priya.menon@panasatech.com',  '+91 98470 11002','female','1988-11-02','2019-02-04','active'),
   ('EMP003','Anu Krishnan', 'anu.krishnan@panasatech.com', '+91 98470 11003','female','1996-07-21','2022-09-05','active'),
   ('EMP004','Rahul Nair',   'rahul.nair@panasatech.com',   '+91 98470 11004','male',  '1993-01-30','2020-11-16','active'),
-  ('EMP005','Deepa Suresh', 'deepa.suresh@panasatech.com', '+91 98470 11005','female','1985-05-09','2018-07-02','active');
+  ('EMP005','Deepa Suresh', 'deepa.suresh@panasatech.com', '+91 98470 11005','female','1985-05-09','2018-07-02','active'),
+  -- EMP006 HAS NO LOGIN, ON PURPOSE, and is the only seeded person who does not.
+  --
+  -- `app_user` below covers EMP001-EMP005. Meera is the new joiner nobody has set up yet, which
+  -- is the state account provisioning exists for and a state the demo could not previously show:
+  -- before migration 0029 there was no way to give anybody a login at all, so every account came
+  -- from this file and an employee without one was unreachable.
+  --
+  -- The name is not invented. `EMP006` and `meera.nair@panasatech.com` are already the placeholder
+  -- values in the employee form and are listed among `i18n:test`'s documented exemptions - so the
+  -- example in the UI and the fixture in the database are now the same person.
+  ('EMP006','Meera Nair',   'meera.nair@panasatech.com',   '+91 98470 11006','female','1997-04-18','2026-09-01','active'),
+  -- The two approvers in the onboarding chain (migrations 0031/0032). They are seeded as PEOPLE
+  -- rather than as bare roles because the chain is about separation of duty: a demo where the HR
+  -- admin holds every role proves nothing, and the interesting assertions are the ones where
+  -- finance cannot do the delivery head's job and neither can do HR's.
+  ('EMP007','Arun Thomas',   'arun.thomas@panasatech.com',   '+91 98470 11007','male',  '1983-08-24','2019-06-03','active'),
+  ('EMP008','Nisha Varghese','nisha.varghese@panasatech.com','+91 98470 11008','female','1986-12-11','2020-03-16','active'),
+  -- A JOINER WHO HAS NOT STARTED. Their joining date is in the FUTURE, which is the whole of what
+  -- makes somebody pre-boarding: the `joined` lifecycle event below is dated then, so
+  -- `fn_employment_status_asof` still reports pre_boarding today. Without one of these the
+  -- onboarding screen opens on "nobody is waiting to start" and the feature cannot be shown at
+  -- all - which is exactly how it was first seen.
+  ('EMP010','Sandeep Pillai','sandeep.pillai@panasatech.com','+91 98470 11010','male','1995-02-27','2027-01-04','pre_boarding');
 
 -- Effective-dated assignments. Priya has TWO periods, so the demo can show real history:
 -- she was an Engineer until 2023-04-01 and an Engineering Manager since.
@@ -258,6 +313,26 @@ SELECT e.id, d.id, g.id, NULL, e.joined_on, 'initial assignment'
   FROM employee e, department d, designation g
  WHERE e.employee_number='EMP005' AND d.code='HR' AND g.code='HRM';
 
+INSERT INTO employment (employee_id, department_id, designation_id, manager_id, valid_from, reason)
+SELECT e.id, d.id, g.id, m.id, e.joined_on, 'initial assignment'
+  FROM employee e, department d, designation g, employee m
+ WHERE e.employee_number='EMP006' AND d.code='ENG' AND g.code='ENGR' AND m.employee_number='EMP002';
+
+INSERT INTO employment (employee_id, department_id, designation_id, manager_id, valid_from, reason)
+SELECT e.id, d.id, g.id, NULL, e.joined_on, 'initial assignment'
+  FROM employee e, department d, designation g
+ WHERE e.employee_number='EMP007' AND d.code='HR' AND g.code='HRM';
+
+INSERT INTO employment (employee_id, department_id, designation_id, manager_id, valid_from, reason)
+SELECT e.id, d.id, g.id, NULL, e.joined_on, 'initial assignment'
+  FROM employee e, department d, designation g
+ WHERE e.employee_number='EMP008' AND d.code='ENG' AND g.code='EM';
+
+INSERT INTO employment (employee_id, department_id, designation_id, manager_id, valid_from, reason)
+SELECT e.id, d.id, g.id, m.id, e.joined_on, 'initial assignment'
+  FROM employee e, department d, designation g, employee m
+ WHERE e.employee_number='EMP010' AND d.code='ENG' AND g.code='ENGR' AND m.employee_number='EMP002';
+
 -- ---------------------------------------------------------------------------
 -- ---------------------------------------------------------------------------
 -- Lifecycle history (migration 0014)
@@ -286,6 +361,9 @@ INSERT INTO employment_event
     (employee_id, event_type, from_status, to_status, effective_on, reason)
 SELECT e.id, 'confirmed', 'active', 'active', e.joined_on + 180, 'probation cleared'
   FROM employee e
+ -- ... except anybody who has not started. Confirming a probation that has not begun would be a
+ -- lifecycle event for something that never happened.
+ WHERE e.status <> 'pre_boarding'
  ORDER BY e.joined_on;
 
 -- 3. Priya's promotion, linked to the assignment period it opened, so the append-only log and
@@ -312,6 +390,13 @@ INSERT INTO app_user (employee_id, email, password_hash, password_algo, role)
 SELECT id, work_email, :'pw_hash', 'scrypt', 'employee'  FROM employee WHERE employee_number='EMP004';
 INSERT INTO app_user (employee_id, email, password_hash, password_algo, role)
 SELECT id, work_email, :'pw_hash', 'scrypt', 'hr_admin'  FROM employee WHERE employee_number='EMP005';
+-- The finance head and the delivery head. `app_user.role` accepts these only since migration
+-- 0031 widened it to match the seven the grant table already permitted - before that a finance
+-- head could not be given a login at all, which is why the role existed and did nothing.
+INSERT INTO app_user (employee_id, email, password_hash, password_algo, role)
+SELECT id, work_email, :'pw_hash', 'scrypt', 'finance'  FROM employee WHERE employee_number='EMP007';
+INSERT INTO app_user (employee_id, email, password_hash, password_algo, role)
+SELECT id, work_email, :'pw_hash', 'scrypt', 'delivery_head' FROM employee WHERE employee_number='EMP008';
 
 -- Effective-dated role grants (migration 0016). `app_user.role` is superseded by this table, so
 -- without these rows fn_user_roles() returns {} and the AuthorizationService correctly denies

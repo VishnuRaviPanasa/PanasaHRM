@@ -22,7 +22,7 @@
  * Run: npm run browser:test   (needs the API on :4000 and the web server on :3100)
  */
 
-import { spawn } from 'node:child_process';
+import { execFileSync, spawn } from 'node:child_process';
 import { existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -71,6 +71,77 @@ async function evalJs(expr) {
   });
   const raw = r?.result?.value;
   try { return JSON.parse(raw); } catch { return raw; }
+}
+
+/**
+ * Wait until an expression is true, or give up.
+ *
+ * `goto` already polls rather than sleeps, and for good reason; everything AFTER a navigation was
+ * still using a fixed `sleep`, which is fine against a warm server and wrong against a cold one.
+ * Restarting the stack and re-running produced four false failures in a row - the HR work-log
+ * form was still a skeleton at +2500ms, so none of its fields existed yet. The checks were right
+ * and the wait was too short, which is the worst kind of red: it sends you hunting a defect that
+ * is not there.
+ */
+async function waitFor(expr, timeoutMs = 12000) {
+  const deadline = Date.now() + timeoutMs;
+  for (;;) {
+    if ((await evalJs(`Boolean(${expr})`)) === true) return true;
+    if (Date.now() >= deadline) return false;
+    await sleep(200);
+  }
+}
+
+/**
+ * Click something, and keep clicking until the page shows it worked.
+ *
+ * A `click()` on a button React has not hydrated yet is a NO-OP - the element is in the DOM,
+ * `querySelector` finds it, the call returns cleanly, and nothing happens. That is what made
+ * B10-B12b fail while the form worked perfectly when driven by hand: `goto` returned as soon as
+ * the card's title text appeared, the click landed a few hundred milliseconds before the handler
+ * was attached, and then twelve seconds of polling watched a form that had never been asked to
+ * open. A fixed sleep would paper over it; retrying the click asserts the outcome instead.
+ *
+ * `clickExpr` must be idempotent - clicking twice on a toggle would close what the first click
+ * opened - so it is written as "click if the target is not already showing".
+ */
+async function clickUntil(clickExpr, readyExpr, timeoutMs = 15000) {
+  const deadline = Date.now() + timeoutMs;
+  for (;;) {
+    if ((await evalJs(`Boolean(${readyExpr})`)) === true) return true;
+    await evalJs(clickExpr);
+    await sleep(400);
+    if ((await evalJs(`Boolean(${readyExpr})`)) === true) return true;
+    if (Date.now() >= deadline) return false;
+  }
+}
+
+/**
+ * Sign in through the real form, as B03 does inline.
+ *
+ * Factored rather than copied, because a second hand-written login is the kind of thing that
+ * drifts. Takes a password so the account-provisioning block can sign in as somebody whose
+ * password was just chosen through the activation page rather than seeded.
+ */
+async function signIn(email, password = PASSWORD) {
+  await goto(`${WEB}/login`, 'document.querySelector("#email")');
+  await evalJs(`(() => {
+    const set = (sel, v) => {
+      const el = document.querySelector(sel);
+      const d = Object.getOwnPropertyDescriptor(el.constructor.prototype, 'value');
+      d.set.call(el, v);
+      el.dispatchEvent(new Event('input', { bubbles: true }));
+    };
+    set('#email', ${JSON.stringify(email)});
+    set('#password', ${JSON.stringify(password)});
+    document.querySelector('form').requestSubmit();
+    return true;
+  })()`);
+  for (let i = 0; i < 60; i++) {
+    await sleep(300);
+    if ((await evalJs('location.pathname')) !== '/login') return true;
+  }
+  return false;
 }
 
 /**
@@ -206,6 +277,98 @@ check('B01 the login page renders', await evalJs('!!document.querySelector("#ema
 check('B02 direction is ltr',
   (await evalJs('getComputedStyle(document.documentElement).direction')) === 'ltr');
 await shot('01-login-en');
+
+/*
+ * B02a-c: THE LOGIN LANGUAGE SWITCHER IS READABLE, AND EXISTS ON A PHONE.
+ *
+ * Reported from the screen: "in login screen, language dropdown visibility is low". Two separate
+ * defects behind one symptom.
+ *
+ * It sat in the dark pitch panel - `bg-ink-900`, #17171a - while styling its own text
+ * `text-ink-600`, #4c4c47. **Measured at 2.07:1**, against the 4.5:1 WCAG asks for 12.5px text.
+ * The globe beside it was `ink-400` and passed at 4.8:1, which is exactly why it presented as a
+ * visible globe next to an unreadable word rather than as a missing control.
+ *
+ * And that panel is `hidden ... lg:flex`, so below 1024px the switcher DID NOT EXIST - somebody
+ * who reads Arabic had no way to choose it before signing in, on a phone or a narrow window. That
+ * is the more serious of the two and it is invisible to any desktop-only check, so B02c sets a
+ * phone viewport rather than trusting the class list.
+ *
+ * The ratio is computed here rather than asserted as a class name, because the contrast depends
+ * on what is actually painted behind the control - which is the thing that changed.
+ */
+const CONTRAST = `(() => {
+  const lin = (c) => { c /= 255; return c <= 0.03928 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4); };
+  const lum = (p) => 0.2126 * lin(p[0]) + 0.7152 * lin(p[1]) + 0.0722 * lin(p[2]);
+  const rgb = (v) => v.replace(/[^0-9.,]/g, '').split(',').filter((x) => x !== '').map(Number);
+  const el = document.querySelector('select');
+  if (!el) return { present: false };
+  const cs = getComputedStyle(el);
+  let node = el, bg = null;
+  while (node) {
+    const c = rgb(getComputedStyle(node).backgroundColor);
+    if (c.length >= 3 && (c[3] === undefined || c[3] > 0.5)) { bg = c; break; }
+    node = node.parentElement;
+  }
+  if (!bg) bg = [255, 255, 255];
+  const pair = [lum(rgb(cs.color)) + 0.05, lum(bg) + 0.05].sort((a, b) => b - a);
+  const r = el.getBoundingClientRect();
+  return {
+    present: true,
+    visible: r.width > 4 && r.height > 4,
+    ratio: Math.round((pair[0] / pair[1]) * 100) / 100,
+    options: el.options.length,
+  };
+})()`;
+
+const sw = await evalJs(CONTRAST);
+check('B02a the login page offers a language switcher', sw?.present === true && sw?.visible === true
+  && Number(sw?.options) >= 2, `${sw?.options} languages`);
+check('B02b its text is readable against whatever is painted behind it',
+  Number(sw?.ratio) >= 4.5, `${sw?.ratio}:1 (WCAG wants 4.5:1 at this size; was 2.07:1)`);
+
+// A phone. The switcher used to live in a `hidden lg:flex` panel, so this is the check that
+// would have caught its total absence - the desktop one could not.
+await send('Emulation.setDeviceMetricsOverride', {
+  width: 390, height: 844, deviceScaleFactor: 1, mobile: true,
+});
+await goto(`${WEB}/login`, 'document.querySelector("#email")');
+const swPhone = await evalJs(CONTRAST);
+check('B02c and it is still there at a phone width, not hidden with the desktop panel',
+  swPhone?.present === true && swPhone?.visible === true && Number(swPhone?.ratio) >= 4.5,
+  swPhone?.present
+    ? `visible=${swPhone?.visible} ${swPhone?.ratio}:1 at 390px`
+    : 'NOT IN THE DOM at 390px');
+await shot('01b-login-phone');
+await send('Emulation.clearDeviceMetricsOverride');
+await goto(`${WEB}/login`, 'document.querySelector("#email")');
+
+/*
+ * B02d: THE CORNER FLIPS IN ARABIC.
+ *
+ * The switcher is pinned with `end-4`, not `right-4`, so the corner that means "the page's own
+ * controls" follows the reading direction - top right in English, top LEFT in Arabic. A hardcoded
+ * `right-4` would look correct in every English screenshot and be in the wrong corner for half the
+ * intended users, which is precisely the kind of thing nobody notices without checking.
+ */
+const cornerOf = `(() => {
+  const el = document.querySelector('select');
+  if (!el) return null;
+  const r = el.getBoundingClientRect();
+  return { centre: Math.round(r.left + r.width / 2), top: Math.round(r.top),
+           width: window.innerWidth };
+})()`;
+const cornerEn = await evalJs(cornerOf);
+await evalJs(`(() => { document.cookie = 'hrm_locale=ar; path=/; max-age=600'; return true; })()`);
+await goto(`${WEB}/login`, 'document.querySelector("#email")');
+const cornerAr = await evalJs(cornerOf);
+check('B02d the switcher sits in the corner, and the corner follows the reading direction',
+  !!cornerEn && !!cornerAr
+  && cornerEn.centre > cornerEn.width / 2 && cornerAr.centre < cornerAr.width / 2
+  && cornerEn.top < 80 && cornerAr.top < 80,
+  `en x=${cornerEn?.centre}/${cornerEn?.width} ar x=${cornerAr?.centre}/${cornerAr?.width}, top ${cornerEn?.top}px`);
+await evalJs(`(() => { document.cookie = 'hrm_locale=en; path=/; max-age=600'; return true; })()`);
+await goto(`${WEB}/login`, 'document.querySelector("#email")');
 
 // Drive the real form.
 await evalJs(`(() => {
@@ -410,20 +573,39 @@ const profileOpened = await evalJs(`(() => {
   return { href: link.getAttribute('href') };
 })()`);
 await sleep(2500);
-check('B09c an employee profile opens from the directory', !profileOpened?.err,
-  profileOpened?.href ?? profileOpened?.err);
+/*
+ * WAIT FOR THE NAVIGATION, not for the click to return. `link.click()` on a Next `<Link>` starts a
+ * CLIENT-SIDE transition, so `location.href` read on the next line is still the directory - and
+ * the `goto` below then dutifully re-navigated to `/employees` and stayed there. Every check after
+ * it measured the directory while claiming to measure a profile, which is how B10-B12b reported
+ * "the form never finished loading" for a form that was never on the page.
+ *
+ * B09c is now the navigation itself rather than the href the link happened to carry.
+ */
+const arrived = await waitFor('location.pathname.startsWith("/employees/")');
+check('B09c an employee profile opens from the directory', !profileOpened?.err && arrived,
+  arrived ? await evalJs('location.pathname') : (profileOpened?.err ?? 'never left the directory'));
 
 await goto(await evalJs('location.href'), 'document.body.innerText.includes("Work log")');
 const offered = await evalJs(`(() => {
   const b = [...document.querySelectorAll('button')]
     .find((x) => /^add work log$/i.test(x.textContent.trim()));
   if (!b) return { err: 'the Add work log action is not on the profile' };
-  b.click();
   return { ok: true };
 })()`);
-await sleep(2500);
-check('B10 HR is offered "Add work log" on the employee profile', !offered?.err,
-  offered?.err ?? 'opened the form');
+/*
+ * Open it by clicking until it is open. Two separate waits are needed and both were missing: the
+ * button has to be hydrated before a click does anything, and the form then fetches this
+ * employee's projects before it can render its selectors.
+ */
+const formReady = await clickUntil(`(() => {
+  if (document.querySelector('#hr-wl-project')) return true;
+  [...document.querySelectorAll('button')]
+    .find((x) => /^add work log$/i.test(x.textContent.trim()))?.click();
+  return true;
+})()`, 'document.querySelector("#hr-wl-project")');
+check('B10 HR is offered "Add work log" on the employee profile', !offered?.err && formReady,
+  offered?.err ?? (formReady ? 'opened the form' : 'the form never finished loading'));
 
 check('B10b the form knows whose effort it is, so there is nothing to pick',
   (await evalJs('document.body.innerText.includes("Recording for")')) === true
@@ -777,6 +959,615 @@ for (let i = 0; i < 60; i++) {
 check('B24 switching back to English restores dir="ltr"', !back?.err && ltr,
   `dir=${await evalJs('document.documentElement.getAttribute("dir")')}`);
 await shot('12-dashboard-en-again');
+
+/*
+ * B26: ACCOUNT PROVISIONING, THROUGH BOTH REAL SCREENS.
+ *
+ * `accounts:test` proves the API end to end - 36 checks - and cannot prove the hand-over, which
+ * is the part with two people and two screens in it: HR reads a code off the profile, and the
+ * employee types it into a page they reach without a session. So this drives exactly that, as a
+ * person would, and the code is CARRIED FROM ONE SCREEN TO THE OTHER by reading it out of the
+ * DOM. If the panel ever stopped rendering the code, or the activation form stopped accepting the
+ * shape it renders, this is the only check that would notice.
+ *
+ * EMP006 Meera Nair is the fixture - a permanent demo employee with no login, which is the state
+ * the feature exists for. The block resets the account afterwards so the suite is re-runnable;
+ * the employee itself cannot be deleted (append-only `employment_event`) and is not meant to be.
+ */
+console.log('\n3b. Account provisioning, HR screen to employee screen');
+
+const resetFixture = () => {
+  try {
+    execFileSync('docker', ['exec', '-i', '-e', 'PGPASSWORD=hrm_dev_only', 'hrm-postgres',
+      'psql', '-U', 'hrm', '-d', 'hrm', '-tAc', `DO $$
+       DECLARE v_e UUID; v_u UUID;
+       BEGIN
+         SELECT id INTO v_e FROM employee WHERE employee_number = 'EMP006';
+         IF v_e IS NULL THEN RETURN; END IF;
+         SELECT id INTO v_u FROM app_user WHERE employee_id = v_e;
+         IF v_u IS NULL THEN RETURN; END IF;
+         DELETE FROM user_activation WHERE user_id = v_u;
+         ALTER TABLE user_role DISABLE TRIGGER tg_user_role_immutable_history;
+         DELETE FROM user_role WHERE user_id = v_u;
+         ALTER TABLE user_role ENABLE ALWAYS TRIGGER tg_user_role_immutable_history;
+         DELETE FROM session WHERE user_id = v_u;
+         DELETE FROM app_user WHERE id = v_u;
+       END $$;`], { encoding: 'utf8', stdio: 'pipe' });
+    return true;
+  } catch { return false; }
+};
+
+if (!resetFixture()) {
+  note('B26 skipped - no docker, so the EMP006 fixture cannot be reset between runs');
+} else {
+  await signIn('deepa.suresh@panasatech.com');
+  // Wait for the ROW, not for the page to have text. The shell renders before the directory
+  // resolves, so `innerText.length > 200` is true while the table is still empty - which failed
+  // this block on a cold server exactly as it failed B10 (see waitFor's comment).
+  await goto(`${WEB}/employees`, 'document.body.innerText.length > 200');
+  await waitFor('[...document.querySelectorAll("a")].some((a) => /Meera Nair/.test(a.textContent))');
+
+  const opened = await evalJs(`(() => {
+    const a = [...document.querySelectorAll('a')].find((x) => /Meera Nair/.test(x.textContent));
+    if (!a) return { err: 'EMP006 Meera Nair is not in the directory' };
+    a.click();
+    return { ok: true };
+  })()`);
+  await sleep(1800);
+  check('B26  HR opens the profile of an employee who has no login', !opened?.err,
+    opened?.err ?? await evalJs('location.pathname'));
+
+  // The panel does not fetch on render - a privileged read is not made just because somebody
+  // opened a profile - so it has to be asked for.
+  await evalJs(`(() => {
+    const b = [...document.querySelectorAll('button')]
+      .find((x) => /^check login$/i.test(x.textContent.trim()));
+    if (b) b.click();
+    return true;
+  })()`);
+  const panel = await waitFor('document.querySelector("#acct-create")');
+  check('B26a the Login panel loads on request and offers to create one', panel,
+    panel ? 'create control present' : 'the panel never rendered');
+
+  await evalJs(`document.querySelector('#acct-create').click()`);
+  const shown = await waitFor(`document.body.innerText.match(/[23-9A-Z]{5}-[23-9A-Z]{5}-[23-9A-Z]{5}-[23-9A-Z]{5}/)`);
+  const shownCode = await evalJs(`(() => {
+    const m = document.body.innerText
+      .match(/[23456789ABCDEFGHJKMNPQRSTVWXYZ]{5}-[23456789ABCDEFGHJKMNPQRSTVWXYZ]{5}-[23456789ABCDEFGHJKMNPQRSTVWXYZ]{5}-[23456789ABCDEFGHJKMNPQRSTVWXYZ]{5}/);
+    return m ? m[0] : '';
+  })()`);
+  check('B26b creating the login shows a one-time code on screen', shown && !!shownCode,
+    shownCode ? `${shownCode} (read off the page)` : 'no code rendered');
+
+  check('B26c and the screen says plainly that it cannot be read again',
+    (await evalJs('/cannot be read again|Shown once/i.test(document.body.innerText)')) === true);
+  await shot('14-account-code');
+
+  /*
+   * The hand-over. A DIFFERENT session now - the employee has no session at all - so the code has
+   * to work with nothing carried over from HR's browser state but the string itself.
+   */
+  await goto(`${WEB}/activate`, 'document.querySelector("#act-code")');
+  const typed = await evalJs(`(() => {
+    const set = (sel, v) => {
+      const el = document.querySelector(sel);
+      const d = Object.getOwnPropertyDescriptor(el.constructor.prototype, 'value');
+      d.set.call(el, v);
+      el.dispatchEvent(new Event('input', { bubbles: true }));
+    };
+    // Typed LOWERCASE and with the dashes stripped, which is how somebody retyping it off a note
+    // would get it. The field re-groups and upper-cases as they type.
+    set('#act-code', ${JSON.stringify(String(shownCode).toLowerCase().replace(/-/g, ''))});
+    set('#act-pw', 'a-passphrase-nobody-else-knows');
+    set('#act-pw2', 'a-passphrase-nobody-else-knows');
+    return { code: document.querySelector('#act-code').value };
+  })()`);
+  check('B26d the code is accepted lowercase and un-grouped, and re-formatted as typed',
+    typed?.code === shownCode, `field shows ${typed?.code}`);
+
+  await evalJs(`document.querySelector('#act-code').closest('form').requestSubmit()`);
+  const activated = await waitFor('/login is ready|\\u062c\\u0627\\u0647\\u0632/i.test(document.body.innerText)', 15000);
+  check('B26e the employee sets their own password through the real form', activated,
+    activated ? await evalJs('document.querySelector("h1")?.textContent') : 'no confirmation shown');
+  await shot('15-activated');
+
+  // And it works: sign in as somebody who could not sign in ninety seconds ago.
+  const inAsNew = await signIn('meera.nair@panasatech.com', 'a-passphrase-nobody-else-knows');
+  check('B26f and can then sign in - the account is genuinely usable', inAsNew === true,
+    inAsNew ? await evalJs('location.pathname') : 'sign-in failed');
+
+  resetFixture();
+  await signIn('deepa.suresh@panasatech.com');
+}
+
+/*
+ * B27: THE ACTIVATION PAGE EXPLAINS ITSELF WHEN THE CODE IS WRONG.
+ *
+ * Reported from the screen as "unable to set password". The page had let arbitrary typing through
+ * a filter that SILENTLY DELETED every character outside the code alphabet, so a few words became
+ * `KANNA-NPANA-SATEC-HCM` - the exact shape of a real code - and then showed a disabled button
+ * with no message. Three separate failures: input reshaped into something plausible, no
+ * explanation of what was wrong, and no way out for somebody who has no code at all.
+ *
+ * B27a-d are that scenario, typed as it was typed. The important one is B27b: a control that
+ * refuses in silence is the defect, so the button is now enabled and the form does the talking.
+ */
+console.log('\n3c. The activation page when the code is wrong');
+
+await goto(`${WEB}/activate`, 'document.querySelector("#act-code")');
+const junk = await evalJs(`(() => {
+  const set = (sel, v) => {
+    const el = document.querySelector(sel);
+    const d = Object.getOwnPropertyDescriptor(el.constructor.prototype, 'value');
+    d.set.call(el, v);
+    el.dispatchEvent(new Event('input', { bubbles: true }));
+  };
+  // What was actually typed on the screenshot: words, not a code.
+  set('#act-code', 'kannan panasa tech hcm');
+  set('#act-pw', 'a-passphrase-nobody-else-knows');
+  set('#act-pw2', 'a-passphrase-nobody-else-knows');
+  return { shows: document.querySelector('#act-code').value };
+})()`);
+await sleep(400);
+
+/*
+ * SOME explanation must appear - not one particular wording. The first version of this check
+ * demanded the look-alike message and failed, because "kannan panasa tech hcm" happens to contain
+ * only characters that ARE in the code alphabet: no O, I, L or U. Nothing was dropped, so the
+ * page's honest complaint is the LENGTH, and it made it. The requirement is that typing words
+ * cannot pass in silence, which is what this now asserts.
+ */
+const explained = await evalJs(`(() => {
+  const m = document.body.innerText.match(/An activation code is [^<]{5,80}|never contain[^<]{5,80}/);
+  return { found: !!m, text: m ? m[0].trim() : '' };
+})()`);
+check('B27a typing words no longer passes as a code shape without comment',
+  explained?.found === true && String(explained?.text).length > 10,
+  `field shows "${junk?.shows}" -> "${String(explained?.text).slice(0, 56)}"`);
+
+const btn = await evalJs(`(() => {
+  const b = document.querySelector('#act-submit');
+  return { disabled: b?.disabled ?? null, text: b?.textContent?.trim() ?? '' };
+})()`);
+check('B27b the submit button is NOT a dead grey control - it can be pressed and answers',
+  btn?.disabled === false, `disabled=${btn?.disabled}`);
+
+await evalJs(`document.querySelector('#act-submit').click()`);
+await sleep(700);
+check('B27c pressing it explains the problem rather than doing nothing',
+  (await evalJs('!!document.querySelector("#act-error") || /look-alike|never contain/i.test(document.body.innerText)')) === true,
+  'a message, not silence');
+
+// A code of the right alphabet but the wrong length says how far off it is.
+await evalJs(`(() => {
+  const el = document.querySelector('#act-code');
+  const d = Object.getOwnPropertyDescriptor(el.constructor.prototype, 'value');
+  d.set.call(el, 'ABCDE-FGHJK');
+  el.dispatchEvent(new Event('input', { bubbles: true }));
+  return true;
+})()`);
+await sleep(400);
+check('B27d an incomplete code says how many characters it has, not just "invalid"',
+  (await evalJs('/you have 10|20 characters/i.test(document.body.innerText)')) === true,
+  await evalJs(`(() => {
+    const m = document.body.innerText.match(/An activation code is[^\\n]*/);
+    return m ? m[0].slice(0, 62) : 'no count shown';
+  })()`));
+
+check('B27e and somebody who has no code at all is told what to do',
+  (await evalJs('/No code\\?/.test(document.body.innerText)')) === true
+  && (await evalJs('[...document.querySelectorAll("a")].some((a) => /sign in/i.test(a.textContent))')) === true,
+  'points at HR, and back to sign in');
+await shot('16-activate-wrong-code');
+
+/*
+ * B28: EVERY CARD BODY LINES UP WITH ITS OWN HEADING.
+ *
+ * Reported twice, from two different screens: the payslip document actions sat ~23px left of the
+ * heading above them (B15a), and then the whole "Change assignment" form ran flush to the card
+ * border while every card around it was inset. Same omission, different call sites - `Card`
+ * carries no padding and `CardHead` supplies its own `px-4 sm:px-5`, so a body placed after a
+ * head has to bring the same inset and several did not.
+ *
+ * MEASURED, NOT PATTERN-MATCHED. A source scan for "unpadded child of <Card>" produced over sixty
+ * candidates across the app, nearly all of them a conditional wrapper whose inner content IS
+ * padded, or a table that must span the full width - unusable as a signal. The browser knows both
+ * left edges exactly, so the check is the subtraction, and it names every offender rather than
+ * failing on the first.
+ *
+ * The tolerance is 2px for sub-pixel layout. A full-bleed body is legitimate - a table, a `<dl>`
+ * with its own dividers, an `Empty` spanning the card - so only bodies that carry their own
+ * horizontal padding are compared, which is exactly the set that is meant to align.
+ */
+const MEASURE_CARDS = `(() => {
+  const out = [];
+  for (const card of document.querySelectorAll('div.rounded-xl.border')) {
+    const head = card.firstElementChild;
+    if (!head || !head.className.includes('border-b')) continue;
+    const title = head.querySelector('h2');
+    if (!title) continue;
+    const body = head.nextElementSibling;
+    if (!body) continue;
+    const bs = getComputedStyle(body);
+    const padded = parseFloat(bs.paddingLeft) > 0 || parseFloat(bs.paddingRight) > 0;
+    if (!padded) continue;
+    const inner = body.firstElementChild ?? body;
+    const t = title.getBoundingClientRect();
+    const i = inner.getBoundingClientRect();
+    if (i.width < 4 || i.height < 4) continue;
+    out.push({ title: title.textContent.trim().slice(0, 26), off: Math.round(i.left - t.left) });
+  }
+  return out;
+})()`;
+
+console.log('\n3d. Card bodies line up with their headings');
+
+await signIn('deepa.suresh@panasatech.com');
+await goto(`${WEB}/employees`, 'document.body.innerText.length > 200');
+await waitFor('[...document.querySelectorAll("a")].some((a) => /Meera Nair/.test(a.textContent))');
+await evalJs(`(() => {
+  [...document.querySelectorAll('a')].find((x) => /Meera Nair/.test(x.textContent))?.click();
+  return true;
+})()`);
+await waitFor('/Assignment history/i.test(document.body.innerText)');
+
+// Open the form that was reported, so it is measured rather than assumed.
+await evalJs(`(() => {
+  const b = [...document.querySelectorAll('button')]
+    .find((x) => /change assignment|^change$/i.test(x.textContent.trim()));
+  if (b) b.click();
+  return true;
+})()`);
+const asgOpen = await waitFor('!!document.querySelector("#ca-effective") || /is currently/i.test(document.body.innerText)');
+check('B28  the Change assignment form opens on the profile', asgOpen,
+  asgOpen ? 'open' : 'the form never appeared');
+
+const profileCards = await evalJs(MEASURE_CARDS);
+const profileBad = (Array.isArray(profileCards) ? profileCards : []).filter((c) => Math.abs(c.off) > 2);
+check('B28a every padded card body on the profile starts where its heading does',
+  Array.isArray(profileCards) && profileCards.length > 0 && profileBad.length === 0,
+  profileBad.length
+    ? `OFF: ${profileBad.map((c) => `${c.title} ${c.off}px`).join(', ')}`
+    : `${profileCards.length} cards, max offset 0px`);
+
+// The payslip form, which is the other place it was reported.
+await evalJs(`(() => {
+  const b = [...document.querySelectorAll('button')]
+    .find((x) => /add payslip/i.test(x.textContent.trim()));
+  if (b) b.click();
+  return true;
+})()`);
+const payOpen = await waitFor('/Pay period/i.test(document.body.innerText)');
+check('B28b the Add payslip form opens', payOpen, payOpen ? 'open' : 'not offered on this profile');
+
+if (payOpen) {
+  const payCards = await evalJs(MEASURE_CARDS);
+  const payBad = (Array.isArray(payCards) ? payCards : []).filter((c) => Math.abs(c.off) > 2);
+  check('B28c and every card inside it lines up too',
+    Array.isArray(payCards) && payCards.length > 0 && payBad.length === 0,
+    payBad.length
+      ? `OFF: ${payBad.map((c) => `${c.title} ${c.off}px`).join(', ')}`
+      : `${payCards.length} cards, max offset 0px`);
+  await shot('17-card-alignment');
+}
+
+/*
+ * B29: THE ONBOARDING SCREEN, SEEN BY THE THREE PEOPLE WHO SHARE IT.
+ *
+ * `onboarding:test` proves the chain 24 ways through the API, including that HR cannot approve
+ * what HR typed. What it cannot show is the screen: whether the queue renders, and whether the
+ * sidebar offers it to the right people. That last part matters more than it looks - onboarding is
+ * the first screen in this product shared by three roles who otherwise see nothing of each other's
+ * work, and it needed a nav gate of its own because `hr` was too wide (it includes the read-only
+ * auditor) and `hr_manage` too narrow (it excludes both approvers).
+ *
+ * The negative is the interesting one: an ordinary employee must not be offered it at all.
+ */
+console.log('\n3e. Onboarding, as the three roles who share it');
+
+await signIn('deepa.suresh@panasatech.com');
+await goto(`${WEB}/onboarding`, 'document.body.innerText.length > 200');
+const hrSees = await waitFor('/Annexures|Onboarding/i.test(document.body.innerText)');
+check('B29  HR opens the onboarding screen', hrSees,
+  hrSees ? await evalJs('document.querySelector("h1")?.textContent') : 'never rendered');
+
+check('B29a the queue is on screen with its status filter',
+  (await evalJs('!!document.querySelector("#onb-filter")')) === true);
+
+/*
+ * B29g: THERE IS SOMEBODY TO PREPARE AN ANNEXURE FOR.
+ *
+ * Reported from the screen: "no employee listed". The form was correct and the roster was not -
+ * every seeded person had already started, so the only people the form may offer (pre-boarding)
+ * was an empty set, and the screen read as broken. A future joining date is the whole of what
+ * makes somebody pre-boarding, and nothing said so, so an employee created with today's date was
+ * active before HR got back to this screen.
+ */
+await clickUntil(`(() => {
+  if (document.querySelector('#onb-emp')) return true;
+  [...document.querySelectorAll('button')]
+    .find((b) => /prepare annexure/i.test(b.textContent.trim()))?.click();
+  return true;
+})()`, 'document.querySelector("#onb-emp")');
+const joiners = await evalJs(`(() => {
+  const sel = document.querySelector('#onb-emp');
+  if (!sel) return { err: 'the prepare form never opened' };
+  return { options: [...sel.options].filter((o) => o.value).map((o) => o.textContent.trim()) };
+})()`);
+check('B29g the prepare form offers a joiner who has not started',
+  Array.isArray(joiners?.options) && joiners.options.length > 0,
+  joiners?.err ?? joiners?.options?.join(' | '));
+
+check('B29b and the sidebar offers it',
+  (await evalJs('[...document.querySelectorAll("nav a")].some((a) => /onboarding/i.test(a.textContent))')) === true);
+
+// The finance head - a role that until now could not even be given a login.
+const asFinance = await signIn('arun.thomas@panasatech.com');
+await goto(`${WEB}/onboarding`, 'document.body.innerText.length > 200');
+check('B29c the finance head can sign in at all, and reaches the same queue', asFinance
+  && (await waitFor('!!document.querySelector("#onb-filter")')),
+  `path=${await evalJs('location.pathname')}`);
+
+check('B29d but is NOT offered the screens that administer people',
+  (await evalJs('![...document.querySelectorAll("nav a")].some((a) => /^settings$/i.test(a.textContent.trim()))')) === true,
+  'least privilege: they approve a package, they do not run HR');
+await shot('18-onboarding-finance');
+
+// The delivery head.
+await signIn('nisha.varghese@panasatech.com');
+await goto(`${WEB}/onboarding`, 'document.body.innerText.length > 200');
+check('B29e the delivery head reaches it too',
+  (await waitFor('!!document.querySelector("#onb-filter")')) === true);
+
+// And an ordinary employee must not be offered it.
+await signIn('vishnu.ravi@panasatech.com');
+await goto(`${WEB}/`, 'document.querySelectorAll("nav a").length > 3');
+check('B29f an ordinary employee is not offered onboarding at all',
+  (await evalJs('![...document.querySelectorAll("nav a")].some((a) => /onboarding/i.test(a.textContent))')) === true,
+  'the nav gate is three roles wide, and they are not one of them');
+
+await signIn('deepa.suresh@panasatech.com');
+await goto(`${WEB}/`, 'document.querySelectorAll("nav a").length > 3');
+
+/*
+ * B30: ROLES ARE A SET ON SCREEN, NOT A SLOT.
+ *
+ * `accounts:test` proves the endpoints, including that HR cannot grant themselves a role. What it
+ * cannot show is that the panel presents roles as something you ADD to rather than something you
+ * replace - which is the whole question that prompted this ("how can we assign multiple roles?").
+ * A dropdown that swaps one role for another would pass every API check and still be the wrong
+ * product.
+ */
+console.log('\n3f. Roles on an account');
+
+await signIn('deepa.suresh@panasatech.com');
+await goto(`${WEB}/employees`, 'document.querySelector("table")');
+await waitFor('[...document.querySelectorAll("a")].some((a) => /Priya Menon/.test(a.textContent))');
+await evalJs(`(() => {
+  [...document.querySelectorAll('a')].find((a) => /Priya Menon/.test(a.textContent))?.click();
+  return true;
+})()`);
+await waitFor('location.pathname.startsWith("/employees/")');
+await goto(await evalJs('location.href'), 'document.body.innerText.includes("Login")');
+
+const panelOpen = await clickUntil(`(() => {
+  if (document.querySelector('#acct-add-role')) return true;
+  [...document.querySelectorAll('button')]
+    .find((b) => /^check login$/i.test(b.textContent.trim()))?.click();
+  return true;
+})()`, 'document.querySelector("#acct-add-role")');
+check('B30  the Login panel shows the roles an account holds', panelOpen,
+  panelOpen ? 'role editor present' : 'never rendered');
+
+const roleState = await evalJs(`(() => {
+  const sel = document.querySelector('#acct-add-role');
+  const chips = [...document.querySelectorAll('li span')]
+    .map((x) => x.textContent.trim()).filter((x) => /^(employee|manager|hr admin|finance|delivery head|hr ops|auditor)/.test(x));
+  return {
+    held: chips,
+    offered: sel ? [...sel.options].filter((o) => o.value).map((o) => o.value) : [],
+  };
+})()`);
+check('B30a it lists MORE THAN ONE role held, as chips',
+  Array.isArray(roleState?.held) && roleState.held.length >= 2,
+  (roleState?.held ?? []).join(' + '));
+
+check('B30b and offers to ADD another rather than replace what is there',
+  Array.isArray(roleState?.offered) && roleState.offered.length >= 3
+  && !roleState.offered.includes('manager'),
+  `offers ${(roleState?.offered ?? []).join(', ')} - already-held roles are not re-offered`);
+
+check('B30c the base `employee` role has no remove control, the others do',
+  (await evalJs(`(() => {
+    const items = [...document.querySelectorAll('li')];
+    const emp = items.find((li) => /^employee/.test(li.textContent.trim()));
+    const mgr = items.find((li) => /^manager/.test(li.textContent.trim()));
+    return !!emp && !!mgr && !emp.querySelector('button') && !!mgr.querySelector('button');
+  })()`)) === true,
+  'every account is also an employee');
+await shot('19-account-roles');
+
+/*
+ * B31: BOTH APPROVALS, THROUGH THE REAL SCREENS, AS THE TWO DIFFERENT PEOPLE.
+ *
+ * `onboarding:test` proves the chain 24 ways through the API. What it cannot show is the thing
+ * that was actually asked - "HR sent an annexure for approval, how does the finance head approve,
+ * and check the delivery head too" - because that question is about which BUTTON each person is
+ * offered on a shared screen, and when. The negative halves matter as much as the positive ones:
+ * while an annexure sits with finance the delivery head must be offered NOTHING, and once it moves
+ * the finance head must lose their control. A screen showing both buttons to both people would
+ * pass every API test, because the API would still refuse - and the product would still be wrong.
+ *
+ * EVERY ASSERTION READS `#onb-status`, NOT THE PAGE TEXT. The first version of this block tested
+ * `/With delivery/.test(document.body.innerText)` and three checks passed while nothing had
+ * happened: "With delivery" is one of the options in the status-filter dropdown, so that string is
+ * on the page permanently. The annexure was still sitting in finance_review the whole time.
+ *
+ * It also OWNS its subject rather than opening whatever row is first: any live annexure for the
+ * joiner is withdrawn at the start, so exactly one exists and it is this block's.
+ */
+console.log('\n3g. The two approvals, on screen');
+
+const statusNow = async () => evalJs('document.querySelector("#onb-status")?.dataset.status ?? null');
+const buttonsNow = `[...document.querySelectorAll('button')].map((b) => b.textContent.trim())
+  .filter((x) => /approve|send back|issue|withdraw|accepted|declined/i.test(x)).join(' | ')`;
+
+/** Open the only annexure that is not in a terminal state. */
+const openLive = async () => {
+  await waitFor('document.querySelectorAll("tbody tr").length > 0');
+  await clickUntil(`(() => {
+    if (document.querySelector('#onb-status')) return true;
+    const live = [...document.querySelectorAll('tbody tr')]
+      .find((r) => !/Accepted|Declined|Withdrawn/.test(r.innerText));
+    live?.querySelector('button')?.click();
+    return true;
+  })()`, 'document.querySelector("#onb-status")');
+  return statusNow();
+};
+
+await signIn('deepa.suresh@panasatech.com');
+await goto(`${WEB}/onboarding`, 'document.body.innerText.length > 200');
+
+// Clear anything in flight, so this block's subject is unambiguous and it can run again.
+for (let i = 0; i < 4; i++) {
+  const live = await evalJs(`[...document.querySelectorAll('tbody tr')]
+    .filter((r) => !/Accepted|Declined|Withdrawn/.test(r.innerText)).length`);
+  if (Number(live) === 0) break;
+  await openLive();
+  const done = await evalJs(`(() => {
+    const b = [...document.querySelectorAll('button')].find((x) => /^withdraw$/i.test(x.textContent.trim()));
+    if (!b) return false;
+    window.prompt = () => 'cleared by the browser verification';
+    b.click();
+    return true;
+  })()`);
+  if (!done) break;
+  await sleep(1200);
+  await goto(`${WEB}/onboarding`, 'document.body.innerText.length > 200');
+  await waitFor('document.querySelectorAll("tbody tr").length >= 0');
+}
+
+await clickUntil(`(() => {
+  if (document.querySelector('#onb-emp')) return true;
+  [...document.querySelectorAll('button')]
+    .find((b) => /prepare annexure/i.test(b.textContent.trim()))?.click();
+  return true;
+})()`, 'document.querySelector("#onb-emp")');
+
+const prepared = await evalJs(`(() => {
+  const set = (sel, v) => {
+    const el = document.querySelector(sel);
+    const d = Object.getOwnPropertyDescriptor(el.constructor.prototype, 'value');
+    d.set.call(el, v);
+    el.dispatchEvent(new Event(el.tagName === 'SELECT' ? 'change' : 'input', { bubbles: true }));
+  };
+  const emp = document.querySelector('#onb-emp');
+  const opt = [...emp.options].find((o) => o.value);
+  if (!opt) return { err: 'no pre-boarding joiner to prepare for' };
+  set('#onb-emp', opt.value);
+  set('#onb-ctc', '1000000');
+  set('#onb-join', '2027-03-01');
+  const nums = [...document.querySelectorAll('input.num')].filter((i) => i.id !== 'onb-ctc');
+  const setEl = (el, v) => {
+    const d = Object.getOwnPropertyDescriptor(el.constructor.prototype, 'value');
+    d.set.call(el, v);
+    el.dispatchEvent(new Event('input', { bubbles: true }));
+  };
+  if (nums[0]) setEl(nums[0], '600000');
+  if (nums[1]) setEl(nums[1], '400000');
+  return { joiner: opt.textContent.trim() };
+})()`);
+await sleep(500);
+check('B31  HR fills the prepare form for a joiner', !prepared?.err, prepared?.err ?? prepared?.joiner);
+
+check('B31a the running total confirms the components agree with the CTC',
+  (await evalJs('document.querySelector("#onb-create") && !document.querySelector("#onb-create").disabled')) === true,
+  await evalJs(`(() => { const m = document.body.innerText.match(/Components total[^\n]*/); return m ? m[0] : ''; })()`));
+
+const created = await clickUntil(`(() => {
+  document.querySelector('#onb-create')?.click();
+  return true;
+})()`, '!document.querySelector("#onb-create")');
+check('B31b the draft is created', created);
+
+let st = await openLive();
+check('B31c it opens as a draft', st === 'draft', `status=${st}`);
+
+const sent = await clickUntil(`(() => {
+  document.querySelector('#onb-submit')?.click();
+  return true;
+})()`, 'document.querySelector("#onb-status")?.dataset.status === "finance_review"');
+check('B31d HR sends it to finance', sent, `status=${await statusNow()}`);
+
+// THE DELIVERY HEAD, while it is still with finance: nothing to do.
+await signIn('nisha.varghese@panasatech.com');
+await goto(`${WEB}/onboarding`, 'document.body.innerText.length > 200');
+st = await openLive();
+check('B31e the delivery head is offered NOTHING while it sits with finance',
+  st === 'finance_review' && (await evalJs(buttonsNow)) === '',
+  `status=${st}, buttons=[${await evalJs(buttonsNow)}]`);
+
+// THE FINANCE HEAD approves.
+await signIn('arun.thomas@panasatech.com');
+await goto(`${WEB}/onboarding`, 'document.body.innerText.length > 200');
+await openLive();
+const financeButtons = await evalJs(buttonsNow);
+check('B31f the finance head IS offered the approval, and a way to send it back',
+  /Approve \(finance\)/.test(String(financeButtons)) && /Send back/.test(String(financeButtons)),
+  financeButtons);
+
+const financeDone = await clickUntil(`(() => {
+  document.querySelector('#onb-fin-approve')?.click();
+  return true;
+})()`, 'document.querySelector("#onb-status")?.dataset.status === "delivery_review"');
+check('B31g finance approves, and it moves to the delivery head', financeDone,
+  `status=${await statusNow()}`);
+
+check('B31h and the finance head now has nothing left to do on it',
+  !/Approve \(finance\)/.test(String(await evalJs(buttonsNow))),
+  'their control disappears once the step is no longer theirs');
+
+// THE DELIVERY HEAD, now that it is their turn.
+await signIn('nisha.varghese@panasatech.com');
+await goto(`${WEB}/onboarding`, 'document.body.innerText.length > 200');
+await openLive();
+const deliveryButtons = await evalJs(buttonsNow);
+check('B31i the delivery head is NOW offered the approval',
+  /Approve \(delivery\)/.test(String(deliveryButtons)), deliveryButtons);
+
+const deliveryDone = await clickUntil(`(() => {
+  document.querySelector('#onb-del-approve')?.click();
+  return true;
+})()`, 'document.querySelector("#onb-status")?.dataset.status === "delivery_approved"');
+check('B31j the delivery head approves', deliveryDone, `status=${await statusNow()}`);
+
+// HR issues, and the trail names both approvers.
+await signIn('deepa.suresh@panasatech.com');
+await goto(`${WEB}/onboarding`, 'document.body.innerText.length > 200');
+await openLive();
+const trail = await evalJs('document.body.innerText.replace(/\\s+/g, " ")');
+check('B31k the trail names WHO approved at each step',
+  /Finance approved . Arun Thomas/.test(String(trail))
+  && /Delivery approved . Nisha Varghese/.test(String(trail)),
+  'separation of duty is visible on the record, not only enforced');
+
+check('B31l money is grouped the Indian way, not mangled',
+  /10,00,000\.00/.test(String(trail)),
+  'a second copy of formatPaise had rendered 1,00000.00 on the approval screen');
+await shot('20-approvals');
+
+const issued = await clickUntil(`(() => {
+  document.querySelector('#onb-issue')?.click();
+  return true;
+})()`, 'document.querySelector("#onb-status")?.dataset.status === "offer_issued"');
+check('B31m HR issues the offer letter', issued, `status=${await statusNow()}`);
+
+const accepted = await clickUntil(`(() => {
+  document.querySelector('#onb-accept')?.click();
+  return true;
+})()`, 'document.querySelector("#onb-status")?.dataset.status === "offer_accepted"');
+check('B31n and records that it was accepted, which frees the joiner for a fresh offer',
+  accepted, `status=${await statusNow()}`);
 
 // ================================================================ no page threw
 console.log('\n4. Nothing threw while all of that happened');

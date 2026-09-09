@@ -216,6 +216,15 @@ console.log('\n5. No untranslated user-facing string survives\n');
  *     'Engineering', 'Senior Engineer', 'Promoted to Senior Engineer' and
  *     'Delivery reorganisation' are the same thing - sample content in a placeholder attribute.
  *   * 'ADR-0005' - a document reference. A reader who cannot then find the document is worse off.
+ *   * 'XXXXX-XXXXX-XXXXX-XXXXX' - the activation-code placeholder. It shows the SHAPE of the code
+ *     the person is holding, and that alphabet is the same in every language.
+ *   * '1200000' - a CTC placeholder, the same category as '0.00'.
+ *   * 'Basic' and 'House rent allowance' - the DEFAULT SALARY COMPONENT LABELS on the annexure
+ *     form. These are not UI copy: they are the initial value of a field HR edits, and whatever
+ *     is left there is SAVED to `salary_annexure_component.label` and printed on the offer letter.
+ *     Translating them would make the stored label depend on which language the person who typed
+ *     it happened to be using, so an Arabic-entered annexure would read back in Arabic to an
+ *     English reader. Data in a row, not a string on a screen.
  *   * the DEMO PEOPLE - 'Vishnu Ravi', 'Priya Menon', 'Deepa Suresh'. These are seed DATA rendered
  *     from a constant, not UI copy. Translating a person's name would be wrong in any product.
  */
@@ -223,12 +232,21 @@ const EXEMPT = new Set([
   'ART', 'ART HRM',
   'ENG', 'SE', 'Engineering', 'Senior Engineer', 'Delivery reorganisation', '1 to 20',
   'EMP006', 'Meera Nair', 'meera.nair@panasatech.com', 'Promoted to Senior Engineer',
-  '0.00', 'ADR-0005',
+  '0.00', 'ADR-0005', 'XXXXX-XXXXX-XXXXX-XXXXX', '1200000',
+  'Basic', 'House rent allowance',
   'Vishnu Ravi', 'Priya Menon', 'Deepa Suresh',
 ]);
 
 const PROPS = /\s(?:title|hint|label|placeholder|emptyHint|sub|aria-label)="([^"]{2,})"/g;
-const JSXTEXT = />\s*([A-Z][^<>{}\n]{3,})\s*</g;
+/*
+ * JSX text must follow a TAG close, not an arrow. `(?<!=)` is what separates them: without it
+ * `const act = async (fn: () => Promise<T>) => {` matches and captures "Promise" as untranslated
+ * copy - the `>` belongs to `=>` and the `<` to a type parameter. Same lesson as DEC-124 from the
+ * other direction: that was a rewriter mistaking an identifier for JSX text, this is a scanner
+ * mistaking a return type for it. An arrow is never followed by JSX text here - a mapped element
+ * renders as `=> <li>Text<`, where the `>` before the text belongs to `li`, not to the arrow.
+ */
+const JSXTEXT = /(?<!=)>\s*([A-Z][^<>{}\n]{3,})\s*</g;
 const OBJTEXT = /(?:msg|message|title|hint|label|error|toast):\s*'([^']{4,})'/g;
 
 const stragglers = [];
