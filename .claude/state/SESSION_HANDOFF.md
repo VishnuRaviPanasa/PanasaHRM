@@ -1,6 +1,86 @@
 # Session Handoff
 
 **Last session:** 2026-09-09
+**Slice worked:** MGR-01 — the manager's feedback on the working demo (8 feature areas)
+**Branch:** `feat/hrm-core-modules` at `4d86e2e`, **nothing committed** — the request was
+explicitly "stop after verification and give me the report and git diff/status".
+
+---
+
+## Completed this session
+
+| Area | What landed |
+|---|---|
+| Migration **0027** | The work hierarchy: `sub_project`, `sub_task`, `task.sub_project_id`, `work_log_entry.sub_task_id`, `active` lifecycle flags, `v_work_hierarchy`. Composite foreign keys make an incoherent combination unrepresentable, which also closes a PRE-EXISTING gap (project_id and task_id were independent FKs) |
+| Migration **0028** | Work-log provenance: `entry_source` + `entered_by_employee_id`, with an ENABLE ALWAYS coherence trigger. No backfill — 0019's period lock forbids it and has no bypass |
+| `packages/authz` | `work.log.write_for` (organisation graph, hr_admin only) and `work.task.manage`; policies, matrix rows. 423 → 435 checks |
+| `apps/api/src/work.ts` | Date-period filtering on attendance (presets + from/to, validated not defaulted); `GET /projects` takes `employeeId` and returns the four-level hierarchy; `POST /work-log` takes `employeeId` and checks authorization, hierarchy, lifecycle and membership; `/team/effort` gains filters and loses its inline role check in SQL |
+| `apps/api/src/work-masters.ts` | New: HR master data for all four levels — tree with usage counts, create, rename, retire, reactivate |
+| Frontend | `PeriodPicker` (shared), attendance rebuilt around it, `/work` with cascading selectors and an HR employee picker, `/team` with filters, `/masters/work-management` |
+| i18n | `lib/i18n` — dictionary (198 keys × 2 locales), provider, `useT`, `useFormat`, `LanguageSwitcher`; `lang`/`dir` resolved server-side from a cookie |
+| Tests | +3 suites (work-hierarchy 44, period-filters 28, i18n 12), +2 DB verify files (20 checks), nav 21 → 23 |
+| Governance | DEC-113 … DEC-121 |
+
+| **Hardening pass** | Five hardcoded date literals removed (leave and timesheet were missed the first time) and FOUR screens that computed their own "today" from the browser's UTC date - which set `min` on a department move's effective-from, ended a payslip period a day short and cut the current day out of every report. `fn_business_date()` now rides `/auth/me`; the dead `todayIsoFallback` is gone |
+| **Arabic completed** | 473 remaining strings keyed across 22 more files; module-level constants (`TABS`, `ATT_FIELDS`, two `EVENT_LABEL` maps) hold `MessageKey` values resolved at render |
+| **Browser verification** | `testing/demo/browser-verify.mjs` - CDP over the installed Edge, 46 checks, screenshots |
+| **New suites** | `bizdate:test` (18), `browser:test` (46); `i18n:test` 12 -> 14 and now globs every file |
+| **Governance** | DEC-122 … DEC-125 |
+
+**Everything green:** 28 migrations from zero, db:verify 264/264, authz 435/435, hooks 99/99,
+upload 45/45, api:build, web:build, demo walkthrough, and every demo suite.
+
+---
+
+## NOT done — the honest remainder
+
+**Arabic is complete across all 29 web files.** Every user-facing string comes from the
+dictionary except 17 exemptions that `i18n:test` enumerates rather than pattern-matches: the
+brand wordmark, form placeholders showing the shape of a value, `ADR-0005`, and the demo people's
+names (seed data, not copy).
+
+**A real browser HAS now verified it.** `browser:test` drives the Edge that Windows already ships
+over the DevTools Protocol - no stack installed - and asserts computed `direction`, Arabic text on
+eight screens, a form's labels, an inline dialog inheriting rtl, and real bounding boxes: the
+first table column sits to the RIGHT of the last, and the sidebar at `left=1032` against content
+at `left=0`. 46 checks.
+
+**The Arabic is still unreviewed by a native speaker.** That has not changed and is the one item
+that cannot be closed from inside this repo. HR vocabulary is domain vocabulary; somebody who
+works in Arabic HR should read `lib/i18n/dictionary.ts` before it is shown outside the team.
+
+**Team effort still has no task filter.** The requirement called it optional and `/team/effort`
+groups by employee and project with no task dimension, so adding one means changing the
+aggregation. Left out deliberately.
+
+**Payslip and report mobile card layouts are an optional enhancement, not a defect.** Both
+screens' tables sit inside `overflow-x-auto`, which is the documented pattern for wide content.
+`/attendance` and `/work` additionally offer a card list below `sm`. Giving payslips and reports
+the same treatment would be nicer and nothing is broken without it.
+
+## Exact next action
+
+1. **Review the diff and decide on the commit.** Nothing is committed. Suggested split: the two
+   migrations + verify files; the authz change; the API changes; the frontend; the i18n foundation.
+2. Then either **finish the i18n conversion** for the 13 remaining screens (mechanical, and the
+   test enforces the rules), or **get a browser** in front of the Arabic RTL layout first — the
+   second is cheaper and would change what the first has to fix.
+
+## Still open from before this session
+
+Unchanged: OR-19 authorization retrofit (`/team/effort` is now done; `hr.ts:19,44,52`,
+`leave.ts:175,201` and the remaining `work.ts` endpoints are not), AUDIT-01 (audit emission on
+leave/attendance/work), the lifecycle UI (OR-32), the org chart (OR-22 remainder), report export
+(OR-27), and **the standing blocker: there is still no account-creation path** — the only
+`INSERT INTO app_user` is the demo seed, so `people.employee.create` makes an employee record and
+not a login. The system demos but cannot onboard a real user.
+
+---
+
+<details>
+<summary>Previous handoff (MST-01 — HR masters), kept for continuity</summary>
+
+**Last session:** 2026-09-09
 **Slice worked:** MST-01 — HR masters (after PAY-01 payslips, RPT-01 reporting)
 **Branch:** `main`, **nothing committed** (CLAUDE.md Rule 14 — no commit without an explicit request)
 
@@ -390,3 +470,5 @@ posture, no EXIF stripping) · **OR-25** (an employee cannot see their own RESTR
    day for 5.5 hours out of every 24 in IST. Ask the server (DEC-091).
 16. **"The traversal is safe" is not "the data is valid".** 0017 proved a cycle terminated the
    walk and left the cycle creatable; the walk then returned a WRONG answer silently (DEC-088).
+
+</details>
