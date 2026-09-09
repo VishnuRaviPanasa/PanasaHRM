@@ -326,7 +326,7 @@ const clientIp = (req: Request): string | null => {
 
 @Controller('auth')
 export class AuthController {
-  constructor(private readonly auth: AuthService) {}
+  constructor(private readonly auth: AuthService, private readonly db: Db) {}
 
   @Post('login')
   async login(
@@ -359,10 +359,28 @@ export class AuthController {
     return { ok: true };
   }
 
+  /**
+   * Who you are, and WHAT DAY IT IS according to the company.
+   *
+   * The business date rides this response because every screen in the shell already calls
+   * it, so there is exactly one authoritative answer and no new endpoint. It matters
+   * because four screens were computing their own with
+   * `new Date().toISOString().slice(0, 10)` - which is the UTC date, and between midnight
+   * and 05:30 IST that is YESTERDAY. Not a rounding error: it set the `min` on a
+   * department move's effective-from (permitting a back-dated period, Rule 3), ended a
+   * payslip pay period a day short against 0024's reconciliation invariant, and cut the
+   * current day out of every default report window. Same class as DEC-091.
+   *
+   * `fn_business_date()` resolves it through the company timezone in `org_setting` - the
+   * organisation's own mechanism, not the server's clock and not the browser's. Returned as
+   * ::text, so it crosses the driver boundary as the DATE string it is (see db.ts: oid 1082
+   * is deliberately NOT parsed into a JS Date).
+   */
   @Get('me')
   @Authenticated()
-  me(@Req() req: Request) {
-    return { actor: currentActor(req) };
+  async me(@Req() req: Request) {
+    const row = await this.db.one(`SELECT fn_business_date()::text AS d`);
+    return { actor: currentActor(req), businessDate: row!.d as string };
   }
 }
 

@@ -12,12 +12,13 @@ import { SettingsModule } from './settings';
 import { PayrollModule } from './payroll';
 import { OrgModule } from './org';
 import { PeopleModule } from './people';
+import { WorkMastersModule } from './work-masters';
 
 @Module({
   imports: [
     DbModule, AuthModule, AuthzModule, StorageModule,
     DocumentsModule, ReportsModule, HrModule, LeaveModule, WorkModule, SettingsModule,
-    PayrollModule, OrgModule, PeopleModule,
+    PayrollModule, OrgModule, PeopleModule, WorkMastersModule,
   ],
 })
 export class AppModule {}
