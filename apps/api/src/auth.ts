@@ -7,7 +7,25 @@ import { createHash, randomBytes, scryptSync, timingSafeEqual } from 'node:crypt
 import type { Request, Response } from 'express';
 import { Db } from './db';
 
-export const COOKIE = 'hrm_session';
+/*
+ * THE SESSION COOKIE, and why its name is computed rather than fixed.
+ *
+ * ADR-0010 specifies `__Host-hrm_session` with `Secure`. That prefix is not decoration: a browser
+ * refuses a `__Host-` cookie unless it is Secure, Path=/ and carries NO Domain attribute, which
+ * makes it impossible for a sibling subdomain to set or overwrite it. But a `Secure` cookie is
+ * also refused over plain HTTP, so hardcoding it would break `http://localhost` development
+ * outright - which is why this had stayed as the weaker form and was recorded as OR-21.
+ *
+ * Deriving both from one switch resolves that: development keeps a plain cookie over HTTP, and
+ * any TLS deployment gets the full ADR-0010 form. The two can never drift apart, because the
+ * prefix and the flag are computed from the same value - and a `__Host-` cookie without `Secure`
+ * simply would not be stored by the browser, so a half-configured deployment fails loudly at
+ * login rather than quietly downgrading.
+ *
+ * Set HRM_SECURE_COOKIES=true wherever the app is served over HTTPS. See .env.example.
+ */
+export const SECURE_COOKIES = process.env.HRM_SECURE_COOKIES === 'true';
+export const COOKIE = SECURE_COOKIES ? '__Host-hrm_session' : 'hrm_session';
 
 /** Mirrors ck_user_role_value in migration 0016. */
 export type Role = 'employee' | 'manager' | 'hr_admin' | 'hr_ops' | 'finance' | 'auditor';
@@ -60,8 +78,10 @@ export interface Actor {
  *     Redis is running (port 55379, DEC-037) but nothing uses it yet.
  *   * Entra OIDC does not exist. `user_identity` is ready for it; the flow is not built, and it
  *     cannot be verified from this sandbox (no network, and no tenant).
- *   * The cookie is `hrm_session`, not ADR-0010's `__Host-hrm_session`, and carries no `Secure`
- *     flag, because the demo runs on http://localhost. Both change together with TLS.
+ *   * The cookie now follows ADR-0010 when HRM_SECURE_COOKIES=true: `__Host-hrm_session` with
+ *     `Secure`. Over plain HTTP it stays `hrm_session` without the flag, because a browser
+ *     refuses both a Secure cookie on HTTP and a __Host- cookie without Secure. Half of OR-21
+ *     closed; the other half - Redis as the authoritative session store - is still open.
  */
 @Injectable()
 export class AuthService {
@@ -300,9 +320,12 @@ export class AuthController {
 
     const { token, actor } = await this.auth.login(email, password, clientIp(req));
     res.cookie(COOKIE, token, {
-      httpOnly: true, sameSite: 'lax', path: '/',
+      httpOnly: true,
+      sameSite: 'lax',
+      // `path: '/'` and no `domain` are REQUIRED by the __Host- prefix, not merely conventional.
+      path: '/',
+      secure: SECURE_COOKIES,
       maxAge: 12 * 60 * 60 * 1000,
-      // secure: true, and the __Host- prefix, arrive with TLS (ADR-0010).
     });
     return { actor };
   }

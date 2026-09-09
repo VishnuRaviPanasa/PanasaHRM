@@ -1,0 +1,183 @@
+# =============================================================================
+# ART HRM - production stack (ADR-0013: Docker Compose on a single VM)
+# =============================================================================
+#
+#   docker compose -f infrastructure/compose/docker-compose.prod.yml up -d
+#
+# EVERY SECRET IS REQUIRED, NOT DEFAULTED. The `${VAR:?...}` form makes compose
+# refuse to start when a value is missing, rather than silently falling back to
+# a development credential. There is deliberately no `.env.example` in this
+# repository - CLAUDE.md forbids committing any `.env*` file - so the full list
+# of variables and how to generate each one is in
+# docs/runbooks/deployment.md.
+#
+# IMAGES ARE REFERENCED BY TAG HERE FOR READABILITY. ADR-0013 requires deploying
+# by DIGEST (`image: art-hrm-api@sha256:...`), built in CI and never on the
+# production host. There is no CI yet (ADR-0013 amendment (a)), so the runbook
+# describes building on a build host and pushing digests. Pin the digests before
+# this is a real production deployment.
+#
+# WHAT IS NOT HERE, and is not an oversight:
+#   * No worker. Nothing in this build enqueues background work yet.
+#   * No observability stack. ADR-0013 wants one; OpenTelemetry is not wired.
+#   * No backup service. There is no backup script and no verified restore
+#     drill - ADR-0013 amendment (b) records that as the principal accepted risk
+#     with no control behind it. Do not treat this stack as durable until that
+#     exists.
+# =============================================================================
+
+name: art-hrm
+
+services:
+  # ---------------------------------------------------------------------------
+  # Edge. The ONLY container that publishes a port to the host.
+  # ---------------------------------------------------------------------------
+  nginx:
+    image: nginx:1.27-alpine
+    restart: unless-stopped
+    depends_on:
+      web:
+        condition: service_started
+      api:
+        condition: service_started
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx/hrm.conf:/etc/nginx/conf.d/default.conf:ro
+      - ./nginx/hrm-proxy.inc:/etc/nginx/conf.d/hrm-proxy.inc:ro
+      # Certificates are mounted from the host, never baked into an image.
+      # Point HRM_TLS_DIR at a directory holding fullchain.pem and privkey.pem.
+      - ${HRM_TLS_DIR:?set HRM_TLS_DIR to the directory holding fullchain.pem and privkey.pem}:/etc/nginx/tls:ro
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost/healthz"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+  # ---------------------------------------------------------------------------
+  # Application
+  # ---------------------------------------------------------------------------
+  api:
+    image: art-hrm-api:${HRM_IMAGE_TAG:?set HRM_IMAGE_TAG to the release being deployed}
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      minio:
+        condition: service_started
+      migrate:
+        condition: service_completed_successfully
+    environment:
+      NODE_ENV: production
+      PORT: "4000"
+      # THE COOKIE. Without this the session cookie ships without `Secure` and
+      # without the __Host- prefix, which over TLS is a downgrade nobody sees.
+      HRM_SECURE_COOKIES: "true"
+      PGHOST: postgres
+      PGPORT: "5432"
+      PGDATABASE: ${HRM_PG_DATABASE:-hrm}
+      # NOT the owner. See the runbook: the API should hold a least-privilege
+      # role, and while it connects as the owner it bypasses every grant,
+      # including the Tier-1 revokes protecting the payslip tables (OR-29).
+      PGUSER: ${HRM_PG_APP_USER:?set HRM_PG_APP_USER}
+      PGPASSWORD: ${HRM_PG_APP_PASSWORD:?set HRM_PG_APP_PASSWORD}
+      HRM_MINIO_HOST: minio
+      HRM_MINIO_PORT: "9000"
+      HRM_MINIO_ACCESS_KEY: ${HRM_MINIO_ACCESS_KEY:?set HRM_MINIO_ACCESS_KEY}
+      HRM_MINIO_SECRET_KEY: ${HRM_MINIO_SECRET_KEY:?set HRM_MINIO_SECRET_KEY}
+      HRM_DOC_BUCKET: ${HRM_DOC_BUCKET:-hrm-documents}
+    expose:
+      - "4000"
+
+  web:
+    image: art-hrm-web:${HRM_IMAGE_TAG:?set HRM_IMAGE_TAG to the release being deployed}
+    restart: unless-stopped
+    depends_on:
+      - api
+    environment:
+      NODE_ENV: production
+      PORT: "3000"
+      HOSTNAME: "0.0.0.0"
+      # Only used if a request reaches Next's /api rewrite. In this stack nginx
+      # routes /api straight to the API, so the rewrite is a fallback.
+      HRM_API_ORIGIN: http://api:4000
+    expose:
+      - "3000"
+
+  # ---------------------------------------------------------------------------
+  # One-shot. Runs to completion before the API starts, and blocks the deploy
+  # if a migration fails or a checksum no longer matches.
+  # ---------------------------------------------------------------------------
+  migrate:
+    image: art-hrm-migrate:${HRM_IMAGE_TAG:?set HRM_IMAGE_TAG to the release being deployed}
+    restart: "no"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      PGHOST: postgres
+      PGPORT: "5432"
+      PGDATABASE: ${HRM_PG_DATABASE:-hrm}
+      # Migrations run as the OWNER. This is the one place that is correct:
+      # creating tables, constraints and triggers requires it, and it is why the
+      # application must NOT use the same role.
+      PGUSER: ${HRM_PG_OWNER_USER:?set HRM_PG_OWNER_USER}
+      PGPASSWORD: ${HRM_PG_OWNER_PASSWORD:?set HRM_PG_OWNER_PASSWORD}
+    command: ["up"]
+
+  # ---------------------------------------------------------------------------
+  # Data. None of these publishes a port - they are reachable only on the
+  # compose network.
+  # ---------------------------------------------------------------------------
+  postgres:
+    image: postgres:18-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${HRM_PG_DATABASE:-hrm}
+      POSTGRES_USER: ${HRM_PG_OWNER_USER:?set HRM_PG_OWNER_USER}
+      POSTGRES_PASSWORD: ${HRM_PG_OWNER_PASSWORD:?set HRM_PG_OWNER_PASSWORD}
+      # scram-sha-256 for host connections; the default would allow md5.
+      POSTGRES_INITDB_ARGS: "--auth-host=scram-sha-256"
+      # Attendance and payroll derive dates from this. It must match
+      # fn_business_date()'s assumption or a punch lands on the wrong day.
+      TZ: Asia/Kolkata
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${HRM_PG_OWNER_USER} -d ${HRM_PG_DATABASE:-hrm}"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+    expose:
+      - "5432"
+
+  minio:
+    image: minio/minio:RELEASE.2025-04-22T22-12-26Z
+    restart: unless-stopped
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${HRM_MINIO_ACCESS_KEY:?set HRM_MINIO_ACCESS_KEY}
+      MINIO_ROOT_PASSWORD: ${HRM_MINIO_SECRET_KEY:?set HRM_MINIO_SECRET_KEY}
+    volumes:
+      - miniodata:/data
+    expose:
+      - "9000"
+      - "9001"
+
+  # Running but unused by the application - sessions are still PostgreSQL rows
+  # (OR-21). Present so the switch is a configuration change rather than a
+  # redeploy of the stack.
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: ["redis-server", "--save", "60", "1", "--appendonly", "no"]
+    volumes:
+      - redisdata:/data
+    expose:
+      - "6379"
+
+volumes:
+  pgdata:
+  miniodata:
+  redisdata:
