@@ -1,0 +1,158 @@
+# PanasaHRM edge nginx - the single door into the stack.
+#
+#   browser -> host nginx (TLS :7777) -> 127.0.0.1:4788 -> THIS nginx :80
+#                                                            |-- /api/ -> api:4000  (NestJS)
+#                                                            `-- /     -> web:3100  (Next.js)
+#
+# A TEMPLATE, not a finished config. The official nginx image runs envsubst over
+# /etc/nginx/templates/*.template at startup; the compose file sets NGINX_ENVSUBST_OUTPUT_DIR
+# to /etc/nginx, so this becomes /etc/nginx/nginx.conf. The only substitution is
+# ${HRM_BASE_PATH} - nginx's own $variables are untouched, because envsubst only replaces names
+# that exist in the environment and none of them do.
+#
+# It has to be a template because the API location depends on the deployment's public path: with
+# basePath=/panasa-hrm the browser asks for /panasa-hrm/api/..., and a plain `location /api/`
+# does not match it. That failure is SILENT and expensive - the request falls through to
+# `location /` and Next proxies it to the API itself, adding a Node hop to every document
+# stream. Found by running it.
+#
+# A WHOLE config, not a conf.d snippet, because `limit_req_zone` and `map` are only valid in the
+# http{} context and rate limiting is part of what this layer exists to provide.
+#
+# TLS is NOT terminated here. The host nginx does that; this listener speaks plain HTTP on a
+# loopback-published port and no certificate is mounted into the container.
+
+user  nginx;
+worker_processes  auto;
+error_log  /var/log/nginx/error.log warn;
+pid        /var/run/nginx.pid;
+
+events {
+    worker_connections  1024;
+}
+
+http {
+    include       /etc/nginx/mime.types;
+    default_type  application/octet-stream;
+
+    sendfile        on;
+    tcp_nopush      on;
+    keepalive_timeout  65;
+    server_tokens   off;          # do not advertise the nginx version (OWASP A05)
+
+    # --- who the client actually is ------------------------------------------------------
+    # Every request arrives from the host nginx, so $remote_addr is that proxy and useless for
+    # rate limiting or for a log. realip rewrites it to the rightmost address in
+    # X-Forwarded-For that is NOT one of the trusted private ranges below.
+    #
+    # This matters for more than tidiness: X-Forwarded-For is partly client-supplied (the host
+    # nginx APPENDS to whatever the client sent), so rate limiting keyed on the raw header is
+    # evaded by varying it. Keyed on the realip-corrected $remote_addr, it cannot be.
+    set_real_ip_from  10.0.0.0/8;
+    set_real_ip_from  172.16.0.0/12;
+    set_real_ip_from  192.168.0.0/16;
+    set_real_ip_from  127.0.0.0/8;
+    real_ip_header    X-Forwarded-For;
+    real_ip_recursive on;
+
+    # Never add a request body or a query string to this format - a document URL or a reset
+    # token in an access log is a credential sitting in a log file (security-guidelines.md).
+    log_format  main  '$remote_addr [$time_local] "$request_method $uri" '
+                      '$status $body_bytes_sent $request_time';
+    access_log  /var/log/nginx/access.log  main;
+
+    gzip              on;
+    gzip_vary         on;
+    gzip_proxied      any;
+    gzip_min_length   1024;
+    gzip_types        text/plain text/css application/json application/javascript
+                      application/x-javascript text/xml application/xml image/svg+xml;
+
+    # The host nginx sets X-Forwarded-Proto; if it is ever reached directly, fall back to the
+    # scheme actually in use rather than forwarding an empty header.
+    map $http_x_forwarded_proto $fwd_proto {
+        default  $http_x_forwarded_proto;
+        ""       $scheme;
+    }
+
+    # Credential stuffing is the threat these exist for (OWASP A07). Login is deliberately far
+    # tighter than the rest of the API. 10 MB per zone is roughly 160k distinct addresses.
+    limit_req_zone  $remote_addr  zone=hrm_login:10m  rate=10r/m;
+    limit_req_zone  $remote_addr  zone=hrm_api:10m    rate=20r/s;
+    limit_conn_zone $remote_addr  zone=hrm_conn:10m;
+    limit_req_status  429;
+    limit_conn_status 429;
+
+    upstream hrm_api { server api:4000; keepalive 16; }
+    upstream hrm_web { server web:3100; keepalive 16; }
+
+    server {
+        listen 80;
+        server_name _;
+
+        # 25 MiB is the document cap enforced in apps/api/src/documents.ts; the multipart
+        # envelope needs a little room on top. Refusing here first means an oversized body
+        # never reaches Node.
+        client_max_body_size 26m;
+        client_body_timeout  60s;
+
+        # The default read timeout for every proxied location. /api/ raises it; see the note in
+        # hrm_proxy_params for why it lives here and not in that file.
+        proxy_read_timeout 60s;
+
+        limit_conn hrm_conn 32;
+
+        # --- security headers ----------------------------------------------------------------
+        # HSTS is deliberately NOT set here: it is a property of the TLS origin and belongs on
+        # the host nginx that terminates it. On a plain-HTTP hop it is a no-op at best.
+        #
+        # `always` matters - without it these are dropped on 4xx/5xx, which is exactly when a
+        # response is most likely to be rendering attacker-influenced content.
+        #
+        # NOTE: nginx's add_header does not inherit into a location that declares its own. If a
+        # location below ever needs an add_header of its own, it must repeat these four.
+        add_header X-Content-Type-Options  "nosniff"                         always;
+        add_header X-Frame-Options         "DENY"                            always;
+        add_header Referrer-Policy         "strict-origin-when-cross-origin" always;
+        # geolocation is 'self', not '()' - the attendance punch captures coordinates
+        # (migration 0012), so denying it outright would break punch-in.
+        add_header Permissions-Policy      "geolocation=(self), camera=(), microphone=(), payment=()" always;
+
+        # Liveness for deploy.sh and the container healthcheck. Answered by nginx itself, so it
+        # means "the edge is up", never "the app is healthy" - deploy.sh checks both.
+        location = /healthz {
+            access_log off;
+            default_type text/plain;
+            return 200 "ok\n";
+        }
+
+        # --- API -----------------------------------------------------------------------------
+        # The public path is ${HRM_BASE_PATH}/api/... and NestJS serves /api/... (setGlobalPrefix
+        # 'api'), so proxy_pass carries an explicit /api/ URI: nginx then replaces the matched
+        # location prefix with it, stripping ${HRM_BASE_PATH} and keeping /api. With an empty
+        # base path this collapses to the identity, which is why one form serves both.
+        location = ${HRM_BASE_PATH}/api/auth/login {
+            limit_req zone=hrm_login burst=5 nodelay;
+            proxy_pass http://hrm_api/api/auth/login;
+            include /etc/nginx/hrm_proxy_params;
+        }
+
+        location ${HRM_BASE_PATH}/api/ {
+            limit_req zone=hrm_api burst=40 nodelay;
+            proxy_pass http://hrm_api/api/;
+            include /etc/nginx/hrm_proxy_params;
+            # Document bytes stream through the API (DEC-046 - no presigned URLs), so a large
+            # PDF must not be buffered to disk on the way out.
+            proxy_buffering off;
+            proxy_read_timeout 120s;
+        }
+
+        # --- web -------------------------------------------------------------------------
+        # Next sets its own Cache-Control on /_next/static (immutable, content-hashed), so
+        # there is no separate location for it here - one would only drop the headers above.
+        location / {
+            proxy_pass http://hrm_web;
+            include /etc/nginx/hrm_proxy_params;
+        }
+    }
+}

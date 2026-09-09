@@ -22,7 +22,8 @@ import { Db } from './db';
  * simply would not be stored by the browser, so a half-configured deployment fails loudly at
  * login rather than quietly downgrading.
  *
- * Set HRM_SECURE_COOKIES=true wherever the app is served over HTTPS. See .env.example.
+ * Set HRM_SECURE_COOKIES=true wherever the app is served over HTTPS. See env.example for the
+ * local default and DEPLOY.md for the deployed value.
  */
 export const SECURE_COOKIES = process.env.HRM_SECURE_COOKIES === 'true';
 export const COOKIE = SECURE_COOKIES ? '__Host-hrm_session' : 'hrm_session';
@@ -333,7 +334,9 @@ export class AuthController {
   @Post('logout')
   async logout(@Req() req: Request, @Res({ passthrough: true }) res: Response) {
     await this.auth.logout(req.cookies?.[COOKIE], clientIp(req));
-    res.clearCookie(COOKIE, { path: '/' });
+    // The clearing cookie must carry the same attributes as the one it replaces, or the browser
+    // treats it as a different cookie and the original survives the logout.
+    res.clearCookie(COOKIE, { path: '/', httpOnly: true, sameSite: 'lax', secure: SECURE_COOKIES });
     return { ok: true };
   }
 

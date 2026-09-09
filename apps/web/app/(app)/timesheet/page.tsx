@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import { addDaysIso, api, ApiError, fmtDate, fmtDateShort, hm, decimalHours, useData, weekdayOf } from '@/lib/api';
 import { Async, Badge, Bar, Button, Card, CardHead, Empty, Toast } from '@/components/ui';
+import { withBasePath } from '@/lib/base-path';
 
 interface Timesheet {
   periodStart: string; periodEnd: string;
@@ -104,7 +105,7 @@ export default function TimesheetPage() {
                   <Empty
                     title="Nothing logged this week"
                     hint="Record effort against your projects on the My Work screen, then submit the week."
-                    action={<Button variant="secondary" onClick={() => (window.location.href = '/work')}>Go to My Work</Button>}
+                    action={<Button variant="secondary" onClick={() => (window.location.href = withBasePath('/work'))}>Go to My Work</Button>}
                   />
                 </Card>
               ) : (

@@ -90,6 +90,182 @@
 
 ---
 
+---
+
+## 2026-09-09, later session: DEPLOY-01 - the production deployment stack
+
+Class **A/B** by changed paths (infrastructure, docs, one auth line, seven web call sites). No
+schema change, no authorization change, no migration.
+
+**Asked for:** the `hr-agent` deployment shape (`C:/Users/.../Project/hr-agent`), reproduced for
+PanasaHRM on `127.0.0.1:4787` - since moved to **4788**, see DEC-109.
+
+| Area | What landed |
+|---|---|
+| `infrastructure/compose/docker-compose.prod.yml` | postgres 18 - minio - one-shot `migrate` - api - web - edge nginx. **Only nginx publishes a port** (`127.0.0.1:4788:80` as of DEC-109). Every secret is `${VAR:?...}` with no default |
+| `infrastructure/docker/{api,web,migrate}.Dockerfile` | Multi-stage, repo-root build context (npm workspaces). API: dev-free second install. Web: Next `output: 'standalone'`. Migrate: `postgres:18-alpine` + nodejs, because `migrate.mjs` drives psql and the client must match the server |
+| `infrastructure/nginx/{nginx.conf,hrm_proxy_params}` | A WHOLE nginx.conf (DEC-095), realip-corrected rate limiting (DEC-096), 4 security headers with `always`, 26m body cap, `/api/` prefix PRESERVED for Nest's global prefix |
+| `deploy.sh` | Preflight (env file present AND no blank secret), pull, build, explicit `run --rm migrate up`, `up -d`, then a THREE-probe verify (DEC-097) |
+| `DEPLOY.md` | The runbook, including the host-nginx block, the build-time base path, backups pointing at `/var/lib/postgresql/18/docker`, and a "Known gaps" table |
+| `infrastructure/compose/prod.env.template` | Deliberately not `.env.example` - writing to `.env*` is a Forbidden Action. `prod.env` added to `.gitignore` |
+| `apps/api/src/auth.ts` | **`secure: HRM_COOKIE_SECURE`** on the session cookie, and the matching attributes on `clearCookie` (DEC-099). This closes the code's own TODO now that TLS exists |
+| `apps/web/lib/base-path.ts` + 4 files | `NEXT_PUBLIC_BASE_PATH` support for path-routing behind the host nginx (DEC-100). Default empty = byte-identical to before |
+| `apps/web/next.config.ts` | `output: 'standalone'`, `outputFileTracingRoot` at the repo root, conditional `basePath`/`assetPrefix` |
+| Decisions | **DEC-094 - DEC-101** |
+
+### VERIFIED BY RUNNING THE WHOLE STACK
+
+Docker was started and the stack was built and run end to end under an isolated project name
+(`-p panasahrm-verify`, throwaway secrets in the scratchpad, volumes removed afterwards). The
+real `panasahrm` project and its volumes were never created.
+
+| Check | Result |
+|---|---|
+| All three images build | **PASS** (`api` 979 MB, `web` 414 MB, `migrate` 515 MB) |
+| `migrate` one-shot against an empty volume | **PASS - 26/26 applied**, exit 0 |
+| postgres / minio / api / web / nginx | **all reported healthy** by their own healthchecks |
+| `nginx -t` inside the container | **PASS** |
+| `/healthz` | **200** |
+| `/panasa-hrm/api/auth/me` | **401** `{"message":"Not signed in",...}` - through the edge, not through Next |
+| `/panasa-hrm/login` | **200** |
+| Page's real asset URLs (`/panasa-hrm/_next/static/*.js`, `*.css`) | **200** - and no root-absolute `/_next` or `/api` left in the HTML |
+| Login rate limit (10r/m, burst 5) | **PASS** - `401 401 401 401 401 401 429 429` |
+| Security headers present on a 4xx | **PASS** (`always` is doing its job) |
+| Template rendered with base path AND empty | both **valid** |
+| `authz:test` / `upload:test` / hooks | 423 / 45 / 99, 0 failed |
+| DB-backed suites (`db:verify`, `demo`, `nav`, `payslip`, ...) | **NOT RUN** - they target the dev stack on 55432, not this one |
+
+### THREE REAL BUGS, all found only by running it
+
+1. **nginx never routed the API** (DEC-102). `location /api/` does not match `/panasa-hrm/api/...`,
+   so every API call fell through to `location /` and Next proxied it onward. **Silent** - the app
+   would have worked, with a Node hop in front of every document stream. Fixed by making the
+   config an envsubst template driven by `HRM_BASE_PATH`.
+2. **`HRM_API_ORIGIN` was inert** (DEC-103). Next bakes `rewrites()` into the routes manifest at
+   `next build`, so the runtime env var did nothing and the web container logged
+   `ECONNREFUSED 127.0.0.1:4000` while the API answered 401 perfectly well on `api:4000`. It is a
+   build arg now. My compose comment had claimed the opposite.
+3. **nginx crash-looped on a duplicate `proxy_read_timeout`** (DEC-104) - `location /api/` set it
+   after including the shared params, which already had it.
+
+### The published port is 4788 (was 4787) - DEC-109
+
+`127.0.0.1:4787` was held by **Code.exe (VS Code), PID 4740** on this machine, so every
+verification ran on 4788 while the configuration still said 4787. That gap - tested on one port,
+shipping another - is now closed: **`HRM_PUBLISH_PORT=4788`** throughout, and `deploy.sh` reads
+the value back out of `prod.env` so its health probes follow whatever is configured.
+
+Still confirm on the VM before deploying, because 4788 being free here proves nothing there:
+
+```bash
+ss -ltnp | grep 4788     # must print nothing
+```
+
+If it is taken, change `HRM_PUBLISH_PORT` in `prod.env` **and** the `panasa_hrm_app` upstream in
+the host nginx together.
+
+### DEPLOY-03 - port moved to 4788, and `deploy.sh` finally run end to end
+
+`HRM_PUBLISH_PORT=4788` everywhere (DEC-109). The rationale text was corrected too: the old
+"4765/4766/4767 are taken" no longer explains the choice now that 4787 is out as well.
+
+**`./deploy.sh` was executed for real for the first time** - every earlier verification drove
+`docker compose` directly with hand-rolled probes. That immediately found **DEC-110**: the probe's
+`|| echo 000` fallback appended to curl's own `000`, so a healthy `200` arrived as `200000`, never
+matched, and the script exited 1 with all six containers healthy and serving. Fixed, plus the
+report columns were a character too narrow.
+
+Verified after the change, from a clean volume:
+
+| Check | Result |
+|---|---|
+| `./deploy.sh --no-pull` | **exit 0** - "Deploy complete. local: http://127.0.0.1:4788/panasa-hrm/" |
+| Preflight on the blank template | names exactly the five empty secrets, refuses before pull or build |
+| Probes | `200 / 401 / 200` |
+| All six containers | healthy, `127.0.0.1:4788->80/tcp` |
+| Teardown | volumes and `prod.env` removed |
+
+### Machine notes
+
+`npm` on PATH in Git Bash resolves to a stray **npm 2.15.12** in the user's home directory, so
+`npm run <script>` fails with "missing script". Call the binaries directly:
+`node node_modules/typescript/bin/tsc`, `node node_modules/@nestjs/cli/bin/nest.js build`,
+`node node_modules/next/dist/bin/next build`. Git Bash also mangles a leading-slash env value, so
+`NEXT_PUBLIC_BASE_PATH=/panasa-hrm` needs `MSYS_NO_PATHCONV=1`. Neither affects Linux containers.
+
+### DEPLOY-02 - reconciling the botched merge (same day, later)
+
+Merge **`aaef373`** pulled a teammate's branch that contained a SECOND, complete deployment stack,
+and **committed the conflict markers**. `git status` was clean, so nothing looked wrong - but
+`apps/api/src/auth.ts` carried `<<<<<<< HEAD` and the API did not compile.
+
+Four files had committed markers: `apps/api/src/auth.ts`, `.gitignore`, `.dockerignore`,
+`infrastructure/compose/docker-compose.prod.yml`.
+
+**The two stacks were different TOPOLOGIES, not variants.** Theirs bound host `:80`/`:443` and
+terminated its own TLS from `HRM_TLS_DIR`, which assumes PanasaHRM owns the VM. Ours publishes
+`127.0.0.1:4788` plain HTTP behind the shared host nginx that already fronts `/hr-agent/`.
+**User chose the loopback-behind-host-nginx model** - that is the real host arrangement (DEC-105).
+
+**Adopted from their branch, because it was better:**
+
+| Their idea | Effect |
+|---|---|
+| API image reinstalls only the two workspaces it needs | **979 MB -> 292 MB** (Next and React were in an API container) |
+| `node:24-alpine` + `postgresql18-client` for the migration runner | **515 MB -> 266 MB** |
+| `seed` behind `profiles: ["seed"]`, sharing the migrate image | Closes the "no way to get data in" gap - and an ordinary `up` cannot start it |
+| Pinned `minio:RELEASE.2025-04-22...` | No silent version drift on the document store |
+| `HRM_PG_OWNER_*` vs `HRM_PG_APP_*` | The seam for OR-29; both are the owner today because of P3-7 |
+| `--auth-host=scram-sha-256` | Unioned with our `--locale=C.UTF-8` (theirs had dropped the locale) |
+| `__Host-` cookie prefix derived from one switch | Closes half of OR-21 |
+
+**Rejected, with reasons:** their `TZ: Asia/Kolkata` on postgres (DEC-106 - `fn_business_date()`
+is `now() AT TIME ZONE <setting>` and immune to it; its own COMMENT says the server runs UTC, and
+IST would make prod disagree with dev on anything using CURRENT_DATE). Their duplicate
+Dockerfiles, `infrastructure/compose/nginx/*` and `docs/runbooks/deployment.md` were removed -
+two runbooks describing two topologies is how somebody follows the wrong one at 2am.
+
+**The dangerous one (DEC-107).** The merge left TWO env vars for the cookie and two `secure:` keys
+in one object literal. `HRM_SECURE_COOKIES=true` on its own produced `__Host-hrm_session`
+**without** `Secure` - a cookie the browser refuses outright. Nobody could have logged in, and it
+would have looked like a session bug. Now one switch drives both.
+
+### Verified after reconciliation - the whole stack, again
+
+Built and run under `-p panasahrm-verify` with throwaway secrets; volumes removed afterwards.
+
+| Check | Result |
+|---|---|
+| `docker compose config` | valid |
+| All three images build | **PASS** - api 292 MB, web 319 MB, migrate 266 MB |
+| migrate one-shot, empty volume | **26/26 applied**, exit 0 |
+| postgres / minio / **redis** / api / web / nginx | **all six healthy** |
+| `/healthz` · `${BASE}/api/auth/me` · `${BASE}/login` · `${BASE}/art-mark.png` | **200 · 401 · 200 · 200** |
+| `hrm-seed` after an ordinary `up -d` | **absent** - the profile guard holds |
+| `--profile seed run --rm seed` | **exit 0**, 6 payslip PDFs into MinIO, demo logins printed |
+| **Real login through the edge** | `__Host-hrm_session=...; HttpOnly; Secure; SameSite=Lax` - full ADR-0010 |
+| **Authenticated `GET /api/auth/me`** | **200**, correct actor with `roles: [employee, hr_admin]` |
+| `api:build` · `web:build` (root and `/panasa-hrm`) | clean |
+| `authz:test` / `upload:test` / hooks | 423 / 45 / 99, 0 failed |
+| `deploy.sh` preflight | names exactly the five blank secrets, refuses before pull or build |
+| DB-backed suites | **NOT RUN** - they target the dev stack on 55432 |
+
+### Exact next action
+
+1. **On the VM: `ss -ltnp | grep 4788`**, then `cp infrastructure/compose/prod.env.template
+   infrastructure/compose/prod.env`, fill the three secrets, and run `./deploy.sh`. The stack is
+   proven to come up; what has never been exercised is `deploy.sh` itself end to end (the
+   verification drove compose directly, with a scratchpad env file).
+2. **A fresh deployment has no users.** Migrations apply schema only, so nobody can log in until
+   the database is seeded or a first administrator is created. See `DEPLOY.md` §4 - and note that
+   a real first-admin bootstrap does not exist yet.
+3. Add the host-nginx block from `DEPLOY.md` §3 and confirm
+   `https://ai.arttechgroup.com:7777/panasa-hrm/` renders.
+4. Then the go-live list in `DEPLOY.md` - **the restore drill is the one that gates everything**
+   (ADR-0013 amendment (b)).
+
+---
+
 ## Exact next action
 
 **Finish OR-19 — the authorization retrofit — starting with `apps/api/src/hr.ts`.**

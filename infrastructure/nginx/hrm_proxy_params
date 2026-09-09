@@ -1,0 +1,21 @@
+# Shared proxy headers for the PanasaHRM edge. Mounted at /etc/nginx/hrm_proxy_params.
+#
+# $remote_addr here is already the realip-corrected client address (see nginx.conf), so X-Real-IP
+# carries the employee's address rather than the host nginx's.
+#
+# The API does not read either header yet: apps/api/src/auth.ts takes the client address from
+# req.socket.remoteAddress, which behind this proxy is the nginx container. Audit rows therefore
+# record the proxy, not the employee. See DEPLOY.md, "Known gaps".
+proxy_http_version 1.1;
+proxy_set_header Host              $host;
+proxy_set_header X-Real-IP         $remote_addr;
+proxy_set_header X-Forwarded-For   $proxy_add_x_forwarded_for;
+proxy_set_header X-Forwarded-Proto $fwd_proto;
+proxy_set_header X-Forwarded-Host  $host;
+proxy_set_header Connection        "";
+proxy_connect_timeout 10s;
+proxy_send_timeout    60s;
+# NOTE: proxy_read_timeout is deliberately NOT set here. nginx refuses a duplicate directive in
+# the same context, so a location that includes this file could not then raise its own read
+# timeout - which /api/ needs for document streaming. It is set at the server level instead and
+# overridden per location, which IS legal because those are different contexts.
