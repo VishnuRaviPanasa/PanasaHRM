@@ -124,7 +124,60 @@ services:
       # application must NOT use the same role.
       PGUSER: ${HRM_PG_OWNER_USER:?set HRM_PG_OWNER_USER}
       PGPASSWORD: ${HRM_PG_OWNER_PASSWORD:?set HRM_PG_OWNER_PASSWORD}
-    command: ["up"]
+    command: ["node", "scripts/migrate.mjs", "up"]
+
+  # ---------------------------------------------------------------------------
+  # DEMO DATA. Behind a profile, so it CANNOT run on an ordinary deploy.
+  # ---------------------------------------------------------------------------
+  #
+  # `docker compose up -d` ignores a profiled service entirely. Loading demo data
+  # therefore takes an explicit, differently-shaped command:
+  #
+  #     docker compose -f docker-compose.prod.yml --profile seed run --rm seed
+  #
+  # That asymmetry is the safety property. This seed is DESTRUCTIVE - it wipes
+  # and recreates every table it touches - so it must never be reachable by the
+  # command somebody types to restart the stack at 2am.
+  #
+  # Two guards have to be opened deliberately, and both are visible here rather
+  # than buried in the script:
+  #
+  #   HRM_SEED_ALLOW_NONDEV  the seed refuses any target that is not
+  #                          127.0.0.1:55432. Inside compose the host is
+  #                          `postgres`, so it refuses by default - correct, and
+  #                          the override has to be stated.
+  #   HRM_DEMO_PASSWORD      every demo account shares one password. Left unset
+  #                          it is the value committed in the repository, which
+  #                          on a reachable host is a public credential. Required
+  #                          here so that cannot happen by omission.
+  #
+  # It runs as the OWNER: clearing effective-dated and append-only tables means
+  # disabling their triggers, which only the owner can do. That is exactly the
+  # residual power the migrations concede to an owner, and exactly why the
+  # application must not be one.
+  seed:
+    profiles: ["seed"]
+    image: art-hrm-migrate:${HRM_IMAGE_TAG:?set HRM_IMAGE_TAG to the release being deployed}
+    restart: "no"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      minio:
+        condition: service_started
+    environment:
+      PGHOST: postgres
+      PGPORT: "5432"
+      PGDATABASE: ${HRM_PG_DATABASE:-hrm}
+      PGUSER: ${HRM_PG_OWNER_USER:?set HRM_PG_OWNER_USER}
+      PGPASSWORD: ${HRM_PG_OWNER_PASSWORD:?set HRM_PG_OWNER_PASSWORD}
+      HRM_SEED_ALLOW_NONDEV: i-understand
+      HRM_DEMO_PASSWORD: ${HRM_DEMO_PASSWORD:?set HRM_DEMO_PASSWORD - do not use the value committed in the repo}
+      HRM_MINIO_HOST: minio
+      HRM_MINIO_PORT: "9000"
+      HRM_MINIO_ACCESS_KEY: ${HRM_MINIO_ACCESS_KEY:?set HRM_MINIO_ACCESS_KEY}
+      HRM_MINIO_SECRET_KEY: ${HRM_MINIO_SECRET_KEY:?set HRM_MINIO_SECRET_KEY}
+      HRM_DOC_BUCKET: ${HRM_DOC_BUCKET:-hrm-documents}
+    command: ["node", "scripts/seed.mjs"]
 
   # ---------------------------------------------------------------------------
   # Data. None of these publishes a port - they are reachable only on the
@@ -143,7 +196,15 @@ services:
       # fn_business_date()'s assumption or a punch lands on the wrong day.
       TZ: Asia/Kolkata
     volumes:
-      - pgdata:/var/lib/postgresql/data
+      # /var/lib/postgresql, NOT .../data. PG18 changed this: the image places the
+      # cluster in a major-version SUBDIRECTORY of this path so `pg_upgrade --link`
+      # can work without crossing a mount boundary. Mounting .../data makes PG18
+      # refuse to start, reporting what looks like a version mismatch.
+      #
+      # docker-compose.dev.yml already carried this note. This file was written
+      # from scratch rather than from that one and reintroduced the bug, which the
+      # first `up` found immediately.
+      - pgdata:/var/lib/postgresql
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${HRM_PG_OWNER_USER} -d ${HRM_PG_DATABASE:-hrm}"]
       interval: 10s

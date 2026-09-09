@@ -4,9 +4,16 @@
 **Status of this build:** works, and is **not production-ready**. Read §1 before scheduling
 anything.
 
-Everything below has been executed except the steps that need a server: the three images build,
-the API container starts and authenticates against a real PostgreSQL, the nginx configuration
-passes `nginx -t`, and the compose file resolves and refuses to start without its secrets.
+**Everything below has been executed.** The full seven-container stack was brought up locally
+behind nginx with TLS, migrations applied, the demo dataset loaded through the seed profile, and
+every screen's data verified through the edge for both an HR and an employee account. The one
+thing not exercised is a real host: DNS, a real certificate, and the least-privilege database
+role in §4.
+
+It also found two bugs that only a run surfaces, both now fixed: the PostgreSQL 18 data volume
+must mount at `/var/lib/postgresql`, not `.../data`, or the server refuses to start reporting a
+version mismatch; and the seed shipped in no image at all, so the deployed stack had no way to
+get any data into it.
 
 ---
 
@@ -23,6 +30,11 @@ nobody can sign in. There is no workaround that does not involve either the demo
 SQL.
 
 **This must be built before the system holds real people.** It is not a configuration gap.
+
+For a **demonstration** there is now a supported path: §9 loads the demo dataset through a
+compose profile. That gives five fictional employees, four departments, four designations, three
+issued payslips each with a downloadable PDF, attendance history and nine working reports. It is
+demo data, not a substitute for account management.
 
 ### 1.2 What is missing for production, beyond that
 
@@ -43,7 +55,9 @@ first four rows above are closed.**
 
 ## 2. What gets deployed
 
-Seven containers on one VM (ADR-0013). Only nginx publishes a port.
+Seven containers on one VM (ADR-0013). Only nginx publishes a port. The `migrate` image
+also carries the demo seed (§9); it is the only image with a dependency of its own, the
+pinned MinIO client the seed needs to upload payslip PDFs.
 
 ```
         :80 :443
@@ -62,7 +76,7 @@ Seven containers on one VM (ADR-0013). Only nginx publishes a port.
 |---|---|---|
 | `art-hrm-api` | `apps/api/Dockerfile` | 292 MB |
 | `art-hrm-web` | `apps/web/Dockerfile` | 319 MB |
-| `art-hrm-migrate` | `infrastructure/docker/Dockerfile.migrate` | 244 MB |
+| `art-hrm-migrate` | `infrastructure/docker/Dockerfile.migrate` | 266 MB |
 
 Migrations run as a **separate one-shot container**, never on app boot (ADR-0013). `api` has
 `depends_on: migrate: service_completed_successfully`, so a failed migration stops the deploy
@@ -209,20 +223,54 @@ Checks 3, 4 and 5 are the ones worth failing the deploy over.
 
 ---
 
-## 9. Demo deployments only
+## 9. Demo data (demonstrations only)
 
-If this is going up for a demonstration rather than for real use, the demo seed is the only way
-to get a login (§1.1). Run it with a private password:
+A fresh database has no accounts (§1.1). For a demonstration, load the demo dataset:
 
 ```bash
-HRM_DEMO_PASSWORD='<a strong value you share out of band>' node scripts/seed.mjs
+docker compose --env-file /etc/art-hrm/env   -f docker-compose.prod.yml --profile seed run --rm seed
 ```
 
-The seed **wipes and recreates** all demo data, so never run it against anything you want to
-keep. It creates five fictional employees; the data is synthetic. Take the deployment down when
-the demo is over rather than leaving it running.
+**The seed sits behind a compose profile, so `up -d` can never run it.** Loading demo data takes
+a differently-shaped command on purpose: the seed is destructive — it wipes and recreates every
+table it touches — so it must not be reachable by the command somebody types to restart the stack
+at 2am.
 
----
+Two guards must be opened deliberately, and both are declared in the compose file rather than
+hidden in the script:
+
+| Variable | Why it is required |
+|---|---|
+| `HRM_SEED_ALLOW_NONDEV` | The seed refuses any target that is not `127.0.0.1:55432`. Set to `i-understand` in the seed service |
+| `HRM_DEMO_PASSWORD` | Every demo account shares one password. Unset, it falls back to the value committed in the repository — a public credential on a reachable host. Compose refuses to start the seed without it |
+
+The seed runs as the **owner**, because clearing effective-dated and append-only tables means
+disabling their triggers, which only the owner can do.
+
+### What you get
+
+| | |
+|---|---|
+| Accounts | 5, all sharing `HRM_DEMO_PASSWORD` |
+| `deepa.suresh@panasatech.com` | hr_admin — masters, reports, payslip administration |
+| `priya.menon@panasatech.com` | manager — approvals, team effort |
+| `vishnu.ravi@panasatech.com` | employee — the one to demonstrate ESS with |
+| Organisation | 4 departments (one nested), 4 designations |
+| Payslips | 3 issued per employee for 2 employees, each with a real downloadable PDF in MinIO |
+| Attendance | History from 31 August to yesterday. **Today is deliberately left open**, so a punch can be demonstrated live |
+| Work | 3 projects, 9 tasks, work logs, an approved and a draft timesheet |
+| Documents | Uploaded documents for 2 employees |
+
+The employee data is fictional. Take the deployment down when the demo is over rather than
+leaving it running.
+
+### Verified end to end
+
+This procedure was executed against the full stack — nginx with TLS, all seven containers — not
+inferred. Confirmed working through the edge: login returns
+`__Host-hrm_session; HttpOnly; Secure`; the employee sees 3 issued payslips and downloads a
+656-byte PDF from MinIO; HR sees 5 employees, 4 departments, 4 designations and 8 reports; and
+every screen's data endpoint returns 200 for both roles.
 
 ## 10. Rollback
 

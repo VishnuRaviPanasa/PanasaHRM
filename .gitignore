@@ -49,3 +49,7 @@ tmp/
 # `**/` because a pattern containing a slash is anchored to this file's directory, and
 # the workspaces keep their own copies (apps/api, apps/web).
 **/.claude/state/dirty-files.txt
+
+# Local verification only - self-signed certificate, never committed
+infrastructure/compose/.tls-local/
+infrastructure/compose/docker-compose.verify.yml
