@@ -4,7 +4,8 @@ import { useEffect, useState } from 'react';
 import { api, ApiError, fmtDate, fmtDateShort, useBusinessDate, useData } from '@/lib/api';
 import { useT } from '@/lib/i18n';
 import {
-  Async, Badge, Button, Card, CardHead, Empty, ErrorBox, Field, Skeleton, Stat, Toast, inputCls,
+  Async, Badge, Button, Card, CardBody, CardHead, Empty, ErrorBox, Field, Skeleton, Stat, Toast,
+  inputCls,
 } from '@/components/ui';
 
 /**
@@ -475,6 +476,7 @@ export function AddPayslip({ employeeId, employeeName, onDone, onCancel }: {
 
       <Card>
         <CardHead title={t('pay.payPeriod')} />
+        <CardBody>
         <div className="grid gap-3 sm:grid-cols-3">
           <Field label={t('leave.from')} htmlFor="ps-from">
             <input id="ps-from" type="date" value={periodStart} max={periodEnd}
@@ -489,7 +491,8 @@ export function AddPayslip({ employeeId, employeeName, onDone, onCancel }: {
               onChange={(e) => setPayDate(e.target.value)} className={inputCls} />
           </Field>
         </div>
-      </Card>
+      </CardBody>
+    </Card>
 
       <div className="grid gap-4 lg:grid-cols-2">
         {(['earning', 'deduction'] as const).map((kind) => (
@@ -499,6 +502,7 @@ export function AddPayslip({ employeeId, employeeName, onDone, onCancel }: {
               hint={kind === 'earning' ? 'Rupees. Leave blank to omit a component.'
                 : 'Enter as positive amounts — they are subtracted.'}
             />
+            <CardBody>
             <div className="space-y-2.5">
               {list.filter((c) => c.kind === kind).map((c) => (
                 <div key={c.code} className="flex items-center gap-3">
@@ -519,7 +523,8 @@ export function AddPayslip({ employeeId, employeeName, onDone, onCancel }: {
                 </div>
               ))}
             </div>
-          </Card>
+          </CardBody>
+    </Card>
         ))}
       </div>
 
@@ -528,6 +533,7 @@ export function AddPayslip({ employeeId, employeeName, onDone, onCancel }: {
           title={t('pay.checkAgainstPdf')}
           hint={t('pay.reconcileHint')}
         />
+        <CardBody>
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
           <Stat label={t('pay.gross')} value={`₹${formatPaise(gross.toString())}`} />
           <Stat label={t('payslips.deductions')} value={`₹${formatPaise(deductions.toString())}`} />
@@ -551,10 +557,12 @@ export function AddPayslip({ employeeId, employeeName, onDone, onCancel }: {
               : `These do not match: the lines total ₹${formatPaise(net.toString())} and you entered ₹${formatPaise(declared.toString())}.`}
           </p>
         )}
-      </Card>
+      </CardBody>
+    </Card>
 
       <Card>
         <CardHead title={t('pay.thePdf')} hint={t('pay.pdfHint')} />
+        <CardBody>
         <input
           type="file"
           accept="application/pdf"
@@ -566,7 +574,8 @@ export function AddPayslip({ employeeId, employeeName, onDone, onCancel }: {
             {file.name} · {(file.size / 1024).toFixed(0)} KB
           </p>
         )}
-      </Card>
+      </CardBody>
+    </Card>
 
       <div className="flex flex-wrap items-center gap-2">
         <Button onClick={() => save(true)} disabled={busy || !matches || !file}>

@@ -49,7 +49,7 @@ interface NavGroup {
   titleKey: MessageKey | null;
   items: readonly NavItem[];
   /** Which actors are OFFERED this group. The API decides who may pass. */
-  when?: 'team' | 'hr' | 'hr_manage';
+  when?: 'team' | 'hr' | 'hr_manage' | 'onboarding';
 }
 
 const NAV_GROUPS: readonly NavGroup[] = [
@@ -103,6 +103,19 @@ const NAV_GROUPS: readonly NavGroup[] = [
        */
       { href: '/reports', labelKey: 'nav.reports' },
     ],
+  },
+  {
+    /*
+     * Onboarding needs its OWN gate, and that is the point rather than an inconvenience: it is the
+     * first screen shared by three roles who otherwise see nothing of each other's work. `hr` is
+     * too wide (it includes the read-only auditor) and `hr_manage` too narrow (it excludes the two
+     * approvers entirely), so neither existing gate fits - which is a fair summary of what the
+     * approval chain added to this product.
+     */
+    id: 'onboarding',
+    titleKey: 'nav.group.onboarding',
+    when: 'onboarding',
+    items: [{ href: '/onboarding', labelKey: 'nav.onboarding' }],
   },
   {
     /*
@@ -173,11 +186,15 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   // Manages the organisation - narrower than `isHr`, which includes the read-only auditor.
   const isHrManage = hasRole(actor, 'hr_admin', 'hr_ops');
 
+  // The three people in the approval chain, and nobody else.
+  const isOnboarding = hasRole(actor, 'hr_admin', 'finance', 'delivery_head');
+
   const groups = NAV_GROUPS.filter((g) => (
     g.when === 'team' ? isTeamLead
       : g.when === 'hr' ? isHr
         : g.when === 'hr_manage' ? isHrManage
-          : true
+          : g.when === 'onboarding' ? isOnboarding
+            : true
   ));
 
   /*

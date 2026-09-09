@@ -138,17 +138,26 @@ export function useFormat() {
  * touch-friendly on every platform for free, and a language chooser is the last control that
  * should need JavaScript to be usable. Each language is named in its own language, so somebody
  * who cannot read the current one can still find theirs.
+ *
+ * IT LOOKS LIKE A CONTROL, which it previously did not. It was `border-0 bg-transparent` with a
+ * transparent ring until hover, so it read as grey text that happened to sit near a globe - and
+ * on the login page's dark panel `text-ink-600` (#4c4c47) on `bg-ink-900` (#17171a) is a contrast
+ * ratio of **2.07:1** measured in the browser, against the 4.5:1 that 12.5px text needs. The
+ * globe was `ink-400` and passed at 4.8:1, which is why the symptom was a visible globe beside an
+ * unreadable word rather than a missing control. It now
+ * carries the same inset ring the rest of the app's inputs use (`inputCls`), so the affordance is
+ * the project's own rather than a new one, and it no longer depends on the surface behind it.
  */
 export function LanguageSwitcher({ className = '' }: { className?: string }) {
   const { locale, setLocale, t } = useI18n();
   return (
     <label className={`flex items-center gap-1.5 ${className}`}>
       <span className="sr-only">{t('app.language')}</span>
-      <span aria-hidden="true" className="text-[12px] text-ink-400">🌐</span>
+      <span aria-hidden="true" className="text-[12px] text-ink-500">🌐</span>
       <select
         value={locale}
         onChange={(e) => isLocale(e.target.value) && setLocale(e.target.value)}
-        className="rounded-lg border-0 bg-transparent py-0.5 pe-1 ps-1 text-[12.5px] text-ink-600 ring-1 ring-inset ring-transparent hover:ring-ink-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-ink-900"
+        className="rounded-lg border-0 bg-white py-1 pe-1.5 ps-1.5 text-[12.5px] font-medium text-ink-800 ring-1 ring-inset ring-ink-300 hover:ring-ink-400 focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ink-900"
       >
         {LOCALES.map((l) => (
           <option key={l} value={l}>{LOCALE_NAME[l]}</option>

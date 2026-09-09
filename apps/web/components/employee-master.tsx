@@ -2,7 +2,9 @@
 
 import { useState } from 'react';
 import { ApiError, api, useData } from '@/lib/api';
-import { Button, Card, CardHead, ErrorBox, Field, Toast, inputCls } from '@/components/ui';
+import {
+  Button, Card, CardBody, CardHead, ErrorBox, Field, Toast, inputCls,
+} from '@/components/ui';
 import { useT } from '@/lib/i18n';
 
 /**
@@ -82,6 +84,7 @@ export function AddEmployee({ onDone, onCancel }: { onDone: () => void; onCancel
         action={<Button variant="secondary" size="sm" onClick={onCancel}>{t('common.cancel')}</Button>}
       />
 
+      <CardBody>
       {error && <div className="mb-3"><ErrorBox message={error} /></div>}
 
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
@@ -149,6 +152,7 @@ export function AddEmployee({ onDone, onCancel }: { onDone: () => void; onCancel
           </span>
         )}
       </div>
+    </CardBody>
     </Card>
   );
 }
@@ -196,6 +200,7 @@ export function ChangeAssignment({ employeeId, employeeName, current, onDone, on
         action={<Button variant="secondary" size="sm" onClick={onCancel}>{t('common.cancel')}</Button>}
       />
 
+      <CardBody>
       {error && <div className="mb-3"><ErrorBox message={error} /></div>}
 
       <p className="mb-3 text-[13px] text-ink-600">
@@ -265,6 +270,7 @@ export function ChangeAssignment({ employeeId, employeeName, current, onDone, on
           <span className="text-[12.5px] text-ink-500">{t('mst.changeOneField')}</span>
         )}
       </div>
+    </CardBody>
     </Card>
   );
 }

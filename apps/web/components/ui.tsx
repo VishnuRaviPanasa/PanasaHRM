@@ -25,6 +25,24 @@ export function CardHead({ title, hint, action }: { title: string; hint?: string
   );
 }
 
+/**
+ * The padded inside of a card.
+ *
+ * `Card` carries NO padding and `CardHead` supplies its own `px-4 sm:px-5`, which means any body
+ * placed after a head has to remember to bring the same inset - and several did not. The symptom
+ * was reported twice: the payslip document actions sat ~23px left of the heading above them, and
+ * then the whole "Change assignment" form ran flush to the card border while every card around it
+ * was inset. Both were the same omission at different call sites.
+ *
+ * Naming it makes the padding the default thing to reach for instead of a value to remember. It
+ * is deliberately NOT folded into `Card`: plenty of cards hold a table, a `<dl>` with its own
+ * dividers, or an `Empty` that must span the full width, and blanket padding would break those -
+ * which is why `Card` had none to begin with.
+ */
+export function CardBody({ children, className = '' }: { children: ReactNode; className?: string }) {
+  return <div className={`px-4 py-4 sm:px-5 ${className}`}>{children}</div>;
+}
+
 export function Stat({ label, value, sub, tone = 'plain' }: {
   label: string; value: ReactNode; sub?: string;
   tone?: 'plain' | 'good' | 'warn' | 'bad' | 'brand';

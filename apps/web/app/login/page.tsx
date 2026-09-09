@@ -6,6 +6,7 @@ import { api, ApiError, type Actor } from '@/lib/api';
 import { Button, Field, inputCls } from '@/components/ui';
 import { ArtMark } from '@/components/logo';
 import { LanguageSwitcher, useT } from '@/lib/i18n';
+import { withBasePath } from '@/lib/base-path';
 
 const DEMO_USERS = [
   { email: 'vishnu.ravi@panasatech.com', label: 'Vishnu Ravi', role: 'Senior Engineer' },
@@ -55,7 +56,23 @@ export default function LoginPage() {
   }
 
   return (
-    <main id="main" className="grid min-h-screen lg:grid-cols-2">
+    <main id="main" className="relative grid min-h-screen lg:grid-cols-2">
+      {/*
+        * THE LANGUAGE SWITCHER SITS IN THE CORNER, which is where a page-level control belongs and
+        * where people look for one. It used to sit inside the centred form block, so on a tall
+        * window it floated halfway down the page above the heading - attached to nothing.
+        *
+        * `end-4`, not `right-4`: in Arabic the corner that means "here are the page's controls" is
+        * the top LEFT, because that is where the reading direction starts. `dir` on <html> flips it.
+        *
+        * It stays over the LIGHT column at every width. That is not incidental - it is the fix
+        * from DEC-128 holding: on the dark pitch panel this control measured 2.07:1 against the
+        * 4.5:1 WCAG needs, and that panel is `hidden lg:flex` so below 1024px it did not render at
+        * all. Corner, light ground, present at every width.
+        */}
+      <div className="absolute top-4 end-4 z-10">
+        <LanguageSwitcher />
+      </div>
       {/* The pitch, so the first screen already says what the product is. */}
       <section className="hidden flex-col justify-between bg-ink-900 p-10 text-white lg:flex">
         <div className="flex items-center gap-2.5">
@@ -85,18 +102,27 @@ export default function LoginPage() {
           </dl>
         </div>
         <p className="text-[12.5px] text-ink-500">{t('login.place')}</p>
-        <div className="mt-4"><LanguageSwitcher /></div>
       </section>
 
       <section className="flex items-center justify-center px-5 py-12 sm:px-8">
         <div className="w-full max-w-sm">
+          {/* The wordmark, for the narrow layout where the pitch panel is not rendered. */}
           <div className="flex items-center gap-2.5 lg:hidden">
             <ArtMark size={32} />
             <span className="text-[15px] font-semibold text-ink-900">{t('app.name')}</span>
           </div>
 
           <h2 className="mt-8 text-[22px] font-semibold text-ink-900 lg:mt-0">{t('login.title')}</h2>
-          <p className="mt-1 text-[13.5px] text-ink-500">{t('login.emailHint')}</p>
+          {/*
+            * A new joiner arrives here first, code in hand, and there was nothing to click. The
+            * link is quiet rather than prominent - most visitors already have a password.
+            */}
+          <a
+            href={withBasePath('/activate')}
+            className="mt-2 inline-block text-[12.5px] font-medium text-brand-700 hover:underline"
+          >
+            {t('login.activate')} →
+          </a>
 
           <form onSubmit={submit} className="mt-6 space-y-4" noValidate>
             <Field label={t('login.email')} htmlFor="email">

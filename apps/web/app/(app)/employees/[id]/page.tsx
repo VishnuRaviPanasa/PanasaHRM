@@ -9,6 +9,7 @@ import { DocumentList, type Doc } from '@/components/documents';
 import { AddPayslip, PayslipDetail, PayslipList } from '@/components/payslips';
 import { ChangeAssignment } from '@/components/employee-master';
 import { WorkEntryForm } from '@/components/work-entry';
+import { AccountCard } from '@/components/account-card';
 import { useT } from '@/lib/i18n';
 
 interface Profile {
@@ -435,6 +436,16 @@ export default function EmployeeProfilePage() {
                 />
               )}
 
+              {/*
+                * The login panel sits above the work log: "can this person get in at all" is a
+                * more fundamental question about a new joiner than what they have logged, and it
+                * is the first thing HR needs on the day somebody starts.
+                */}
+              <AccountCard
+                employeeId={e.id}
+                employeeName={e.full_name}
+                isHrAdmin={hasRole(me.data?.actor, 'hr_admin')}
+              />
               <WorkLogCard
                 employeeId={e.id}
                 employeeName={e.full_name}

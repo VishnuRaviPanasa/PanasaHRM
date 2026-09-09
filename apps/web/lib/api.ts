@@ -153,7 +153,10 @@ export const api = {
   del: <T>(path: string) => request<T>(path, { method: 'DELETE' }),
 };
 
-export type Role = 'employee' | 'manager' | 'hr_admin' | 'hr_ops' | 'finance' | 'auditor';
+// Mirrors `packages/authz` Role, widened to seven by migration 0031: `finance` is the finance
+// head and `delivery_head` the delivery head in the onboarding approval chain.
+export type Role = 'employee' | 'manager' | 'hr_admin' | 'hr_ops' | 'finance' | 'auditor'
+  | 'delivery_head';
 
 export interface Actor {
   userId: string;
