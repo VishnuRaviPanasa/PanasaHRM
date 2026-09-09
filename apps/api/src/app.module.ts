@@ -13,12 +13,14 @@ import { PayrollModule } from './payroll';
 import { OrgModule } from './org';
 import { PeopleModule } from './people';
 import { WorkMastersModule } from './work-masters';
+import { AccountsModule } from './accounts';
+import { OnboardingModule } from './onboarding';
 
 @Module({
   imports: [
     DbModule, AuthModule, AuthzModule, StorageModule,
     DocumentsModule, ReportsModule, HrModule, LeaveModule, WorkModule, SettingsModule,
-    PayrollModule, OrgModule, PeopleModule, WorkMastersModule,
+    PayrollModule, OrgModule, PeopleModule, WorkMastersModule, AccountsModule, OnboardingModule,
   ],
 })
 export class AppModule {}
