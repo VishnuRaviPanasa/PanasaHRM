@@ -41,7 +41,27 @@ const isoDate = (v: unknown): string | null => {
   return /^\d{4}-\d{2}-\d{2}$/.test(s) ? s : null;
 };
 
+/**
+ * Client IP for the audit trail. Never logged as PII beyond the audit row itself.
+ *
+ * The API publishes no port of its own - the only path in from outside the compose network is
+ * through the edge nginx (infrastructure/nginx/nginx.conf.template), which resolves the real
+ * client via `set_real_ip_from` restricted to private ranges before setting X-Real-IP. So this
+ * is a single, already-verified address, not a raw header to parse defensively - and trusting it
+ * is what makes it trustworthy at all: without this, every audit row recorded the nginx
+ * container's own address instead of the employee's, which is exactly what a review of real
+ * `identity.login%` rows surfaced (2026-09-09).
+ *
+ * Falls back to the socket peer for anything that reaches the API directly - local
+ * `npm run api:dev`, or a test hitting the API container with no edge in front of it. A sibling
+ * container on the same compose network could still forge X-Real-IP directly to the API; the
+ * edge is the only externally reachable path, and the residual internal one is accepted for a
+ * single-VM deployment (ADR-0013).
+ */
 const clientIp = (req: Request): string | null => {
+  const forwarded = req.headers['x-real-ip'];
+  const header = Array.isArray(forwarded) ? forwarded[0] : forwarded;
+  if (header) return header;
   const raw = (req.socket?.remoteAddress ?? '').replace(/^::ffff:/, '');
   return raw && raw !== '::1' ? raw : null;
 };
