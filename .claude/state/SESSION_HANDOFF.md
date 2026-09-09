@@ -2,8 +2,22 @@
 
 **Last session:** 2026-09-09
 **Slice worked:** MGR-01 — the manager's feedback on the working demo (8 feature areas)
-**Branch:** `feat/hrm-core-modules` at `4d86e2e`, **nothing committed** — the request was
-explicitly "stop after verification and give me the report and git diff/status".
+**Branch:** `feat/hrm-core-modules` at `7d30bad`, **committed and pushed** (8 commits) after the
+report was reviewed.
+
+> **THERE IS A SECOND BRANCH: `feat/ask-hrm-assistant`, at `533fdec`, branched from `7d30bad`.**
+> It holds ASST-01 — "Ask HRM", a deterministic assistant answering "how many leaves are
+> available for me?" and eight similar questions from a closed intent table, with no model calls.
+> It is complete and green (assistant:test 23, browser-verify 71, both builds clean) and it is
+> **PARKED, NOT ADOPTED**: *"lets keep this in a separate branch. Will decide later whether to go
+> with this chatbot or not."* This branch is deliberately free of it, so if the answer is no the
+> branch is simply deleted. **Do not merge it without asking.**
+>
+> `DEC-126` and `DEC-127` are allocated on that branch. **Work on THIS branch starts at
+> `DEC-128`** — otherwise the two logs collide on any later merge, which has already happened
+> once here (DEC-111). The full ASST-01 notes, including the analysis of whether a *real* LLM
+> chatbot is possible and the three non-engineering gates in front of it, are in that branch's
+> copy of this file.
 
 ---
 
