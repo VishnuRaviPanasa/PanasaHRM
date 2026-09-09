@@ -59,7 +59,11 @@ DELETE FROM attendance_day;
 ALTER TABLE project_member DISABLE TRIGGER tg_project_member_immutable_history;
 DELETE FROM project_member;
 ALTER TABLE project_member ENABLE ALWAYS TRIGGER tg_project_member_immutable_history;
+-- 0027 added two levels below the project. Children first: sub_task references task,
+-- and task references sub_project, so deleting in the other order raises.
+DELETE FROM sub_task;
 DELETE FROM task;
+DELETE FROM sub_project;
 DELETE FROM project;
 -- user_identity and user_role reference app_user (migration 0016), so they go first.
 -- user_role is effective-dated, so Rule 3 refuses DELETE - same "the owner disables it
@@ -493,6 +497,24 @@ SELECT 'MOBL', 'Mobile App', 'Meridian Retail', m.id, '2026-07-20'
   FROM employee m WHERE m.employee_number = 'EMP002';
 SET hrm.allow_backdated_period = 'on';
 
+-- Sub-projects (0027). Deliberately uneven, because the shapes have to be demonstrable:
+--
+--   * HRM and CPRT have sub-projects; MOBL has NONE, so its tasks hang directly off the project.
+--     That is the `task.sub_project_id IS NULL` case, and it is the one the first draft of
+--     v_work_hierarchy made invisible - see check WH6.
+--   * HRM-P2 is INACTIVE, so the master-data lifecycle is visible without anybody having to
+--     deactivate something during a demo, and "an inactive branch is not selectable for new
+--     effort" has a fixture.
+INSERT INTO sub_project (project_id, code, name, active)
+SELECT p.id, v.code, v.name, v.active
+  FROM project p
+  JOIN (VALUES
+    ('HRM',  'HRM-P1',  'Phase 1 - Core HR',   true),
+    ('HRM',  'HRM-P2',  'Phase 2 - Payroll',   false),
+    ('CPRT', 'CP-DISC', 'Discovery',           true),
+    ('CPRT', 'CP-BUILD','Build',               true)
+  ) AS v(pcode, code, name, active) ON v.pcode = p.code;
+
 -- Membership is effective-dated (0019). It begins when the project began, so the effort
 -- already seeded against these projects falls inside a period the member actually held.
 INSERT INTO project_member (project_id, employee_id, role, valid_from, reason)
@@ -535,25 +557,47 @@ SELECT p.id, e.id, m.role, p.started_on, 'seeded at project start'
 -- the block used to sit ABOVE the project_member insert and no membership existed yet. Hence its
 -- position here, after the memberships it depends on. The database was right and the fixture was
 -- wrong, which is the correct direction for that argument to be settled in.
-INSERT INTO task (project_id, code, title, status, closed_at, assignee_employee_id, due_on)
-SELECT p.id, t.code, t.title, t.status,
+--
+-- 0027 ADDS THE PARENT COLUMN. `spcode` is NULL for a task that belongs directly to its project,
+-- which is every MOBL task plus HRM-13. The LEFT JOIN is what makes that legal: an inner join
+-- would silently drop exactly those rows, and fk_task_sub_project would never complain because
+-- there is nothing wrong with them.
+INSERT INTO task (project_id, sub_project_id, code, title, status, closed_at,
+                  assignee_employee_id, due_on)
+SELECT p.id, sp.id, t.code, t.title, t.status,
        CASE WHEN t.status IN ('done', 'cancelled') THEN now() END,
        a.id,
        CASE WHEN t.due_offset IS NULL THEN NULL
             ELSE fn_business_date() + t.due_offset END
   FROM project p
   JOIN (VALUES
-    ('HRM','HRM-11','Leave module',              'in_progress', 'EMP001',  -6),
-    ('HRM','HRM-12','Attendance module',         'in_progress', 'EMP003',   3),
-    ('HRM','HRM-13','Work log and timesheets',   'in_progress', 'EMP001', NULL),
-    ('HRM','HRM-14','Authentication',            'done',        'EMP001', -20),
-    ('CPRT','CP-41','API integration',           'in_progress', 'EMP004',  -2),
-    ('CPRT','CP-42','Dashboard UI',              'in_progress', 'EMP001',   5),
-    ('CPRT','CP-43','Payment reconciliation',    'open',         NULL,     NULL),
-    ('MOBL','MB-07','Offline sync',              'in_progress', 'EMP003', NULL),
-    ('MOBL','MB-08','Push notifications',        'open',         NULL,      12)
-  ) AS t(pcode, code, title, status, assignee, due_offset) ON t.pcode = p.code
+    ('HRM','HRM-P1', 'HRM-11','Leave module',              'in_progress', 'EMP001',  -6),
+    ('HRM','HRM-P1', 'HRM-12','Attendance module',         'in_progress', 'EMP003',   3),
+    ('HRM', NULL,    'HRM-13','Work log and timesheets',   'in_progress', 'EMP001', NULL),
+    ('HRM','HRM-P1', 'HRM-14','Authentication',            'done',        'EMP001', -20),
+    ('CPRT','CP-BUILD','CP-41','API integration',          'in_progress', 'EMP004',  -2),
+    ('CPRT','CP-BUILD','CP-42','Dashboard UI',             'in_progress', 'EMP001',   5),
+    ('CPRT','CP-DISC', 'CP-43','Payment reconciliation',   'open',         NULL,     NULL),
+    ('MOBL', NULL,   'MB-07','Offline sync',               'in_progress', 'EMP003', NULL),
+    ('MOBL', NULL,   'MB-08','Push notifications',         'open',         NULL,      12)
+  ) AS t(pcode, spcode, code, title, status, assignee, due_offset) ON t.pcode = p.code
+  LEFT JOIN sub_project sp ON sp.project_id = p.id AND sp.code = t.spcode
   LEFT JOIN employee a ON a.employee_number = t.assignee;
+
+-- Sub-tasks (0027). CP-41b is INACTIVE for the same reason HRM-P2 is: the "cannot be selected
+-- for new effort, but a work log already filed against it still reads correctly" pair needs both
+-- halves to exist in the fixture, not just the happy one.
+INSERT INTO sub_task (task_id, code, title, active)
+SELECT t.id, v.code, v.title, v.active
+  FROM task t
+  JOIN project p ON p.id = t.project_id
+  JOIN (VALUES
+    ('HRM-11', 'HRM-11a', 'Ledger schema',        true),
+    ('HRM-11', 'HRM-11b', 'Balance projection',   true),
+    ('HRM-12', 'HRM-12a', 'Punch capture',        true),
+    ('CP-41',  'CP-41a',  'Auth handshake',       true),
+    ('CP-41',  'CP-41b',  'Error mapping',        false)
+  ) AS v(tcode, code, title, active) ON v.tcode = t.code;
 
 -- ---------------------------------------------------------------------------
 -- Timesheets
@@ -585,13 +629,15 @@ BEGIN
               WHERE employee_number IN ('EMP001','EMP003','EMP004') LOOP
         FOR d IN SELECT g::date FROM generate_series(DATE '2026-08-31', DATE '2026-09-04', INTERVAL '1 day') g LOOP
             INSERT INTO work_log (employee_id, work_date) VALUES (r.id, d) RETURNING id INTO v_log;
-            INSERT INTO work_log_entry (work_log_id, project_id, task_id, minutes, description)
-            SELECT v_log, p.id, t.id, 270, 'Feature work'
+            INSERT INTO work_log_entry (work_log_id, project_id, task_id, minutes, description,
+                                        entered_by_employee_id, entry_source)
+            SELECT v_log, p.id, t.id, 270, 'Feature work', r.id, 'self'
               FROM project p JOIN task t ON t.project_id = p.id
              WHERE p.code = CASE WHEN r.employee_number='EMP004' THEN 'CPRT' ELSE 'HRM' END
              LIMIT 1;
-            INSERT INTO work_log_entry (work_log_id, project_id, task_id, minutes, description)
-            SELECT v_log, p.id, t.id, 150, 'Review, standup and fixes'
+            INSERT INTO work_log_entry (work_log_id, project_id, task_id, minutes, description,
+                                        entered_by_employee_id, entry_source)
+            SELECT v_log, p.id, t.id, 150, 'Review, standup and fixes', r.id, 'self'
               FROM project p JOIN task t ON t.project_id = p.id
              WHERE p.code = CASE WHEN r.employee_number='EMP003' THEN 'MOBL' ELSE 'CPRT' END
              LIMIT 1;
@@ -609,11 +655,13 @@ BEGIN
 
     INSERT INTO work_log (employee_id, work_date, timesheet_period_id)
     VALUES (v_emp, '2026-09-07', v_period) RETURNING id INTO v_log;
-    INSERT INTO work_log_entry (work_log_id, project_id, task_id, minutes, description)
-    SELECT v_log, p.id, t.id, 390, 'Leave ledger and balance projection'
+    INSERT INTO work_log_entry (work_log_id, project_id, task_id, minutes, description,
+                                        entered_by_employee_id, entry_source)
+    SELECT v_log, p.id, t.id, 390, 'Leave ledger and balance projection', v_emp, 'self'
       FROM project p JOIN task t ON t.project_id=p.id AND t.code='HRM-11' WHERE p.code='HRM';
-    INSERT INTO work_log_entry (work_log_id, project_id, task_id, minutes, description)
-    SELECT v_log, p.id, t.id, 120, 'API integration review'
+    INSERT INTO work_log_entry (work_log_id, project_id, task_id, minutes, description,
+                                        entered_by_employee_id, entry_source)
+    SELECT v_log, p.id, t.id, 120, 'API integration review', v_emp, 'self'
       FROM project p JOIN task t ON t.project_id=p.id AND t.code='CP-41' WHERE p.code='CPRT';
 
     -- Anu and Rahul: fully logged Mon-Thu so the team overview has real totals
@@ -629,14 +677,49 @@ BEGIN
                     AND NOT (r.employee_number = 'EMP004' AND g::date = DATE '2026-09-07') LOOP
             INSERT INTO work_log (employee_id, work_date, timesheet_period_id)
             VALUES (r.id, d, v_period) RETURNING id INTO v_log;
-            INSERT INTO work_log_entry (work_log_id, project_id, task_id, minutes, description)
+            INSERT INTO work_log_entry (work_log_id, project_id, task_id, minutes, description,
+                                        entered_by_employee_id, entry_source)
             SELECT v_log, p.id, t.id,
-                   CASE WHEN r.employee_number='EMP004' THEN 480 ELSE 420 END, 'Feature work'
+                   CASE WHEN r.employee_number='EMP004' THEN 480 ELSE 420 END, 'Feature work',
+                   r.id, 'self'
               FROM project p JOIN task t ON t.project_id = p.id
              WHERE p.code = CASE WHEN r.employee_number='EMP004' THEN 'CPRT' ELSE 'MOBL' END
              LIMIT 1;
         END LOOP;
     END LOOP;
+
+    -- ------------------------------------------------------------------ HR on behalf
+    -- 0028's other provenance value, with a fixture rather than a comment. Deepa (EMP005,
+    -- hr_admin) records effort Rahul did not enter himself, attributed all the way down to a
+    -- SUB-TASK so the deepest level of the hierarchy has a real row behind it.
+    --
+    -- It is filed on today's business date, inside the DRAFT week. Filing it in the approved week
+    -- would have been refused by the period lock, which is the correct answer and not a fixture
+    -- to fight - HR corrects a locked period by adjustment, never by writing into it.
+    --
+    -- Rahul's empty Monday (2026-09-07) is deliberately LEFT empty: that is the
+    -- attendance-vs-effort variance the team screen exists to show, and back-filling it here
+    -- would have quietly deleted the demo's only piece of evidence that the two domains are
+    -- separate (ADR-0015).
+    SELECT id INTO v_emp FROM employee WHERE employee_number = 'EMP004';
+    SELECT id INTO v_period FROM timesheet_period
+     WHERE employee_id = v_emp AND period_start = '2026-09-07';
+
+    INSERT INTO work_log (employee_id, work_date, timesheet_period_id)
+    VALUES (v_emp, fn_business_date(), v_period)
+    ON CONFLICT (employee_id, work_date)
+      DO UPDATE SET timesheet_period_id = coalesce(work_log.timesheet_period_id,
+                                                   EXCLUDED.timesheet_period_id)
+    RETURNING id INTO v_log;
+
+    INSERT INTO work_log_entry (work_log_id, project_id, task_id, sub_task_id, minutes,
+                                description, entered_by_employee_id, entry_source)
+    SELECT v_log, p.id, t.id, st.id, 90, 'Client workshop - recorded by HR',
+           (SELECT id FROM employee WHERE employee_number = 'EMP005'), 'hr_entry'
+      FROM project p
+      JOIN task t     ON t.project_id = p.id AND t.code = 'CP-41'
+      JOIN sub_task st ON st.task_id = t.id  AND st.code = 'CP-41a'
+     WHERE p.code = 'CPRT';
 END $$;
 
 COMMIT;
