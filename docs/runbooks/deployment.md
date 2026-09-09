@@ -125,9 +125,39 @@ SELECT has_table_privilege('hrm_app', 'payslip', 'SELECT');
 
 ## 5. Environment variables
 
+### Generate it on the server — do not send it to anyone
+
+```bash
+sudo mkdir -p /etc/art-hrm
+sudo sh scripts/make-env.sh /etc/art-hrm/env
+```
+
+**The secrets must never travel through chat, email or a ticket.** The PostgreSQL owner password
+gives full control of every record, and the MinIO secret key is equivalent to a bulk export of
+every employee document and payslip. Anything sent over a messaging channel lands in message
+history, mail archives and backups nobody involved controls — and it cannot be un-sent, because
+rotating it later does not remove the copies.
+
+So nobody writes a secret down and nobody shares one. `scripts/make-env.sh` generates them with
+`openssl rand` on the host that will use them, writes the file `0600`, and prints only the values
+that are **not** secret — so its output is safe to paste into a ticket. It refuses to overwrite an
+existing file, because regenerating would rotate the credentials in the file while the services
+still expect the current ones.
+
+Two values it cannot know are left blank for you: `HRM_IMAGE_TAG` and `HRM_TLS_DIR`.
+
+Validate without starting anything:
+
+```bash
+docker compose --env-file /etc/art-hrm/env   -f infrastructure/compose/docker-compose.prod.yml config >/dev/null
+```
+
+Compose uses `${VAR:?...}`, so it names any variable still missing.
+
+### The full list
+
 There is deliberately **no `.env.example`** in the repository: the project's own rules forbid
-committing any `.env*` file. Create the environment file on the host, `chmod 600`, owned by the
-deploy user.
+committing any `.env*` file, and a template invites someone to fill it in and then send it.
 
 | Variable | Required | Notes |
 |---|---|---|
@@ -145,9 +175,6 @@ deploy user.
 `HRM_SECURE_COOKIES=true` is set in the compose file itself, not the environment file. It makes
 the session cookie `__Host-hrm_session` with `Secure`. **Do not turn it off behind TLS** — and
 note it cannot be on without TLS, because a browser refuses a `Secure` cookie over HTTP.
-
-Compose uses `${VAR:?...}`, so a missing secret aborts the deploy instead of falling back to a
-development default.
 
 ---
 
