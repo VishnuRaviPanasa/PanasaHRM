@@ -223,6 +223,390 @@ report was reviewed.
 
 ---
 
+## 2026-09-10 — DEC-172: "ctc for hisham" answered, "ctc for candidate" did not
+
+**Two faults, and neither was about permissions** — which is why every gate stayed green.
+
+**(a) My selector prompt forbade it.** I wrote *"you can look up pay … but only ever for ONE
+person at a time"*, meaning to carry ADR-0021 §3 forward. §3 forbids ranking, comparing,
+averaging and totalling. **"One person at a time" is a rule that exists nowhere** — HR reads the
+whole queue on `/onboarding`. So the model was told a pay question naming nobody is unanswerable
+and correctly picked nothing. The prompt now states the real rule and says outright that
+*listing records is not comparing them*.
+
+**(b) The sentence discarded rows it already had.** `onboarding_annexure_amounts` described
+`rows[0]` only, and my own comment justified it as avoiding "the comparison §3 keeps out". That
+reasoning was wrong. The SQL was right all along — `subjectDefault: 'scope'`, ordered by
+`updated_at`, never by amount — so every candidate was already in `rows` and already masked;
+only the prose threw them away. Now one bullet per candidate, components inline (the panel parses
+only `**bold**` and `- `), and the richer per-component form for a single named person.
+
+**(c) A tooling bug, found fixing (b).** Generalising `pay:test` P15 off a literal string was
+right, but the patch script wrote the regex through a JS template literal and **`\b` became a
+literal 0x08 backspace byte in the file** — so the pattern required a control character before
+"draft". It presented as a code failure and was a tooling failure. All patched files are now
+scanned for stray control characters (clean). **A template literal is the wrong instrument for
+writing a regex into a file.**
+
+| Gate | Result |
+|---|---|
+| `assistant:redteam` | **2353 passed, 0 failed** |
+| `pay:test` · `assistant:onboarding` | **66** · **85** |
+| `authz:test` · guards | **553** · **99** |
+
+### Restarting the API — the answer to "is `node dist\main.js` enough?"
+
+**Yes**, with three conditions:
+
+1. **Kill the old process first** or it dies on `EADDRINUSE :::4000`.
+2. **Run it from `apps/api`** so `dist/main.js` resolves.
+3. **The shell must already hold `HRM_LLM_API_KEY`.** The API loads no `.env` (verified: no
+   dotenv import, no env file in the repo root), so a shell without it starts fine and every
+   assistant turn refuses with `disabled`.
+
+**No rebuild is needed** — `dist` is current. **No web rebuild** — nothing under `apps/web`
+changed for pay.
+
+### Still unverified
+
+The prompt fix in (a) has **not met a live model**: the spare API these suites run against holds
+no key, and the running API predates the build. After a restart, ask as HR: *"proposed ctc for
+candidate?"* (the failing one), *"proposed ctc for hisham?"*, and *"who earns the most"* (must
+refuse). The remaining risk there is SELECTION, not access — and nothing deterministic can prove
+it, which is what `assistant:accuracy` would be for, if that file existed on this branch.
+
+## 2026-09-10 — ADR-0021 / DEC-171: the assistant reports pay, and the figures stay in India
+
+**Decided by the product owner:** *"everybody should have the option to see their salary. and hr
+have option to see everyibnes salary. this is what we want."* This supersedes ADR-0020 §6's first
+bullet (*"No tool reads compensation"*) — see [ADR-0021](docs/adr/0021-assistant-may-report-pay.md),
+which is **Proposed** and records its narrow reading of ADR-0014 so it can be rejected openly.
+
+**The ask was small because the policy already said it.** `payroll.payslip.read` admits the
+subject always plus `hr_admin`/`finance` for everyone, and `PAY()` is already
+`['hr_admin','finance'], self: true`. **No action, cell, scope or matrix entry changed.**
+
+**§2 is the real work: no pay figure is sent to a provider.** A tool declaring `money: true`
+composes its own sentence and the controller returns **before `buildAnswerPayload`** — no
+payload, no provider call. `HRM_LLM_ANSWER_FROM_ROWS=false` was rejected as the mechanism: it is
+a global degraded mode that shows no figure at all.
+
+| Tool | |
+|---|---|
+| `pay_my_payslip` | own payslips; `selfOnly` |
+| `pay_employee_payslip` | a named person's, for `hr_admin`/`finance` |
+| `pay_payslip_document` | the PDF link, never bytes or a presigned URL |
+| `onboarding_annexure_amounts` | the annexure CTC + components, approval chain only |
+
+**§4, the consequence: the pay phrase-block is gone.** A role-blind regex cannot decide
+`"what is the salary of EMP006"` — answered for HR, refused for an employee. Pay moved to
+`AuthorizationService`. **DEC-168's and DEC-170's forty lines of carve-out regex deleted
+themselves**, which is the clearest evidence the list had been standing in for a decision it
+could not make. What survives is forbidden for *everybody*, tested by being refused for
+`hr_admin` too: ranking, comparison, aggregates, scoring, appraisal rating, raise
+recommendations.
+
+### The bug the product owner then found, and it was mine
+
+*"from hr cant see onboarding guys expected salary. but cam see others salary."* I put the
+amounts tool in domain `pay`. The router picks ONE domain and
+`candidates = t.domain === domain || t.domain === 'cross'` — so a question saying "onboarding"
+routed to `onboarding`, where the tool **was not a candidate at all**, and the model picked a
+process tool that returns no figures. Moved to **`cross`**, the one domain always in the
+candidate list.
+
+That move exposed something worse: the red team's no-payload assertion keyed off
+`domain === 'pay'`, so relocating the tool would have **silently dropped it from the guarantee**.
+`money` is now a declared property of the tool, published by `/assistant/capabilities`. And the
+controller **fails closed** — a `money` tool with no sentence is refused rather than falling
+through to the answer path.
+
+| Gate | Result |
+|---|---|
+| `assistant:redteam` — the ADR-0020 release gate | **2353 passed, 0 failed** (100%) |
+| `pay:test` (**new**) | **66 passed, 0 failed** |
+| `assistant:onboarding` | **85 passed, 0 failed** |
+| `authz:test` · `db:verify` · guards | **553** · **292 PASS, 0 FAIL** · **99** |
+
+### Next action
+
+**Restart the API again** — the routing fix (`cross`) landed after the 13:54 restart, so the live
+panel still has the amounts tool in `pay` and HR still cannot reach it by asking. Then ask, as
+HR: *"salary of onboarded candidate"*, *"what is my salary"* as an employee, and
+*"who earns the most"* (must refuse).
+
+`0032` SA0 still fails on missing EMP006 fixtures — unchanged since DEC-167, still the only red
+check in `db:verify`.
+
+## 2026-09-10 — DEC-170: the headline, not the subscript. A permissions outcome is now a refusal
+
+**DEC-169 was half a fix, and the report named exactly why:** *"its like subscript. main response
+says different."* The reply was **"I have nothing for onboarding pending."** above a correct note
+saying the account cannot see onboarding. The wrong half was the half in large type.
+
+DEC-169 returned the asker's own subjects as ROWS so that DEC-165's *"Nothing is on file … answer
+as an absence"* instruction could not fire. It didn't fire — **and the answer was still an
+absence**, because a model was still being asked to write a sentence for a question whose answer
+is "you cannot ask that", and it answered the question as put.
+
+**Whether a reply is about DATA or about WHAT THE ASKER MAY ASK is known exactly, in code, before
+any prompt exists.** `gateTool` has already decided. DEC-142(b) established the right shape for
+the sibling case, and that refusal was in the *same screenshot*, answering correctly.
+
+- `ToolResult` gains **`notPermitted?: string`** — a tool that knows its result is about
+  permissions carries the whole reply there.
+- The controller returns `{ code: 'not_permitted', message }` before masking and before any
+  answer call, in **both `/ask` and `/run`** (the latter because `/run`'s worth as a gate is that
+  it is the identical path).
+- No model call, no `modelPayload`, nothing to paraphrase. **This grants no tool the power to
+  refuse an action** — authorization happened in `gateTool`; this words an already-decided outcome.
+
+> Your account cannot see onboarding approvals. You can ask about attendance, leave, your own
+> record, people and the org chart, or work and timesheets.
+
+The redirect moved *into* the message — a bare "you cannot see that" is accurate and useless.
+DEC-169's *"so this says nothing about whether any exist"* hedge is gone: it existed to correct a
+contradicting headline, and this now *is* the headline.
+
+**O15 asserts that no `modelPayload` was built at all** — the machine-checkable form of "the
+wording is deterministic", and immune to however a model feels about phrasing an absence.
+
+| Gate | Result |
+|---|---|
+| `assistant:onboarding` | **71 passed, 0 failed** |
+| `assistant:redteam` | **2197 passed, 0 failed** |
+| `authz:test` · `db:verify` · guards · build | **553** · **287 PASS, 0 FAIL** · **99** · clean |
+
+### A trap in the suites, found the hard way
+
+A mid-session red-team run reported **5 failures naming EMP007** in `people_directory_lookup`,
+unrelated to any change: the joiner was created **while the suite was running**, and section 0
+snapshots reachable-people once at startup — so the oracle held 6 people and the tools correctly
+returned 7. Re-ran clean at 2197. **A race currently looks exactly like a leak**, and nothing in
+the suite says it must not run against a database somebody is editing. Worth fixing before it
+wastes somebody's afternoon.
+
+### Live data now
+
+`onboarding_annexure_status` as `hr_admin` returns both real joiners — **EMP007 Hisham Islah**
+(draft, waiting on HR, joins 2026-09-15) and **ALIYAS / JOHN** (withdrawn, "nobody — it is
+closed") — open work sorted above closed, and no money column. Still needs an API restart to
+reach the live panel.
+
+## 2026-09-10 — DEC-169: a permissions outcome was answered as an absence of data
+
+**Reported from the panel, and the screenshot carried its own control case.** An employee asked
+two questions in a row:
+
+| Asked | Answered | |
+|---|---|---|
+| "priyas leave balance?" | *"Priya Menon is outside what your account can see."* | correct — DEC-142(b) |
+| "any onboarding pending?" | *"There is no onboarding pending."* | **wrong** |
+
+An employee holds no grant on `salary_annexure` at all, so the second answer is a claim about the
+company's data made because of the asker's permissions. Nothing leaked and nothing was denied,
+which is why nothing caught it.
+
+**The chain:** no onboarding tool is in an employee's catalogue → the selector chose
+`meta_capabilities` with `topic: 'onboarding'` → its topic filter matched none of *their* domains
+→ zero rows → `buildAnswerPayload` says next to `Total rows found: 0`, correctly for a data
+lookup, *"Nothing is on file for that. Answer as an absence … in the words of the question"*
+(DEC-165). The model was **instructed** to phrase an absence.
+
+**Fixed in one file** ([tools-meta.ts](apps/api/src/assistant/tools-meta.ts)), no policy change —
+the request was to keep it small. The topic filter now runs over a map built *before* filtering,
+so "I hold nothing" and "I hold nothing **for this topic**" are distinguishable; a topic that
+matches nothing returns **the subjects the caller does hold**, which makes `rows.length > 0` so
+DEC-165's absence instruction cannot fire, with the reason in the note:
+
+> Your account cannot see onboarding approvals, so this says nothing about whether any exist.
+> These are the subjects it can be asked about instead.
+
+Also fixed: `onboarding` had no entry in that tool's `SUBJECT` label map (my omission in
+DEC-168), so an `hr_admin` was offered `onboarding` in lower case beside six sentence-cased
+subjects. Now "Onboarding approvals".
+
+| Gate | Result |
+|---|---|
+| `assistant:onboarding` | **67 passed, 0 failed** (was 57) |
+| `assistant:redteam` | **2194 passed, 0 failed** |
+| `authz:test` · guards · API build | **553** · **99** · clean |
+
+The new checks assert the **payload**, not a sentence: `modelPayload` is the exact text a turn
+sends, so O15/O16 prove the model is never *told* to answer as an absence — model-independent,
+and the only half provable without a key. O18/O19 pin the opposite direction, so the fix cannot
+decay into "ignore the topic".
+
+**Still open, same class:** the `no_tool` refusal on this path says only "outside what this
+assistant can answer" and never mentions permissions — fair for a topic that does not exist,
+thin for one the asker merely cannot see. Left alone deliberately; it needs its own decision
+about how much a refusal should reveal.
+
+## 2026-09-10 — DEC-168: onboarding questions in the assistant, without the money
+
+**Four tools, one prohibition, and the record's own name was the design problem.**
+
+`onboarding_annexure_status` · `onboarding_pending_approvals` · `onboarding_upcoming_joiners` ·
+`onboarding_annexure_history`, in a new `onboarding` routing domain (migration **0036** widens
+`ck_assistant_message_domain`; the transcript INSERT happens at the END of a turn, so a domain
+the router can reach but the constraint rejects answers the user and then fails the audit row).
+
+**The figures are unreachable and the control is the FIELD REGISTRY, not the SELECT lists.**
+ADR-0020 §6 makes ADR-0014's *"no AI input to … compensation"* structural with **"No tool reads
+compensation"**, and says it lacks the authority to relax it. `salary_annexure` is registered
+without `declared_annual_ctc_minor`, `amount_minor` or `ctc_at_decision_minor`, and the registry
+is default-deny — so adding a money column to a query below yields a row without it rather than
+a disclosure. `self: false` on every field, because `onboarding.annexure.read` denies the subject
+deliberately and `fieldMask` consults `isSubject` before roles.
+
+**The pay block needed a carve-out** (third pass over DEC-142's tension): the record is *called* a
+"salary annexure", so `what is the status of the salary annexure for John?` was being refused as
+`forbidden_purpose`. The five `salary`/`pay` TOPIC patterns moved to `FORBIDDEN_PAY_TOPIC` and are
+skipped only for a question naming the record and asking for no figure; `ctc`/`payslip`/`bonus`
+stayed unconditional, and a second figure test was needed because `show me the annexure amounts`
+contains no salary word at all.
+
+**The red team caught 9 failures and they were not the tools.** `familyOf` defaulted the
+unclassified `salary_annexure` to the `reporting` oracle, but the policy is `orgRows(...)` =
+ALLOW_ALL for its four roles — a finance head approves *any* hire. A fourth `organisation` oracle
+was added, bounded by the roster, and deliberately NOT the per-caller `directory` set (see below).
+
+| Gate | Result |
+|---|---|
+| `assistant:onboarding` (**new**) | **57 passed, 0 failed** |
+| `assistant:redteam` — the ADR-0020 release gate | **2194 passed, 0 failed** (100%) |
+| `authz:test` | **553 passed, 0 failed** (was 423; the registry entry adds cells) |
+| `db:verify` | **287 PASS, 0 FAIL** (was 282; +5 from 0036) |
+| `guards.test.mjs` · both builds | **99 passed** · clean |
+
+### Next action
+
+1. **Restart the API to make this live.** The running process predates the build, so the tools are
+   compiled and not serving. It holds `HRM_LLM_API_KEY` from an environment this session cannot
+   reproduce — hence not restarted here. Then ask, against a real key: *"what stage is John's
+   annexure at?"*, *"what is waiting for my approval?"*, *"who is joining next month?"*, and
+   *"what is the CTC in John's annexure?"* (must refuse). **Nothing here has met a live model.**
+2. **`0032` SA0 still fails** — `EMP006 and EMP005 must both be seeded`. Unchanged from DEC-167 and
+   still the only red check in `db:verify`.
+
+### Two things found on the way, both still open
+
+- **`/employees` has no `assertCan` at all** — `@Authenticated()` plus a hand-written column
+  allowlist. The matrix says `finance: deny, auditor: deny, delivery_head: deny` on
+  `people.employee.list` and the endpoint enforces none of it, which is why every role's directory
+  oracle holds the whole roster. That is why the new `organisation` oracle does **not** borrow it:
+  the bound would silently tighten the day somebody fixes the endpoint. Pre-existing, untouched.
+- **Two npm scripts point at files that do not exist**: `assistant:test` →
+  `testing/demo/assistant-flow.test.mjs` and `assistant:accuracy` →
+  `testing/assistant/accuracy.test.mjs`. Both are almost certainly still on
+  `feat/ask-hrm-assistant`; the merge took the `package.json` entries without the suites. Same
+  renumber/merge class as DEC-167, and it means the numbers those scripts once reported cannot be
+  reproduced on this branch.
+
+## 2026-09-10 — DEC-167: six migrations had silently never run; `/onboarding` was the symptom
+
+**Reported as "why is onboarding not visible in the UI?" and it was two separate faults.**
+
+1. **The sidebar link and the route were missing** because the web server was serving a `next
+   build` from 03:38 while the onboarding page landed at 10:44. `next start` serves the prebuilt
+   `.next`, so `/onboarding` 404'd and the nav group was not in the bundle. Fixed by rebuilding
+   the web workspace and restarting — done by the operator, and the link now renders.
+2. **The page then loaded but its list threw `relation "salary_annexure" does not exist`.**
+   `salary_annexure` arrives in 0032, and **0029, 0030, 0031, 0032, 0033 and 0034 had none of
+   them ever been applied.** Cause: commit `cddf1bd` renamed `0029_assistant_transcripts.sql`
+   to `0035_...` to resolve a merge collision, but left the database recording version `0029`
+   with that file's checksum. The runner compared it against `0029_account_activation.sql`,
+   found drift, and refused to apply ANYTHING — correct behaviour (DEC-012), and its blast
+   radius is every later migration. See DEC-167 for the full reasoning and for why a checksum
+   override would have been actively dangerous here.
+
+**Now green:** `migrate status` **35/35 applied, no drift** · `db:verify` **282 PASS, 0 FAIL** ·
+`GET /api/onboarding/annexures` → **`200 {"rows":[]}`** as `hr_admin`.
+
+### Next action — the onboarding chain still has no people in it
+
+`0032_salary_annexure.verify.sql` check **SA0 aborts**: `EMP006 and EMP005 must both be seeded`.
+The live roster stops at **EMP005**. The onboarding fixtures exist only in `demo.sql`:
+
+| | | |
+|---|---|---|
+| **EMP006** Meera Nair | the candidate | deliberately has **no login** |
+| **EMP007** Arun Thomas | `finance` — approves the money | |
+| **EMP008** Nisha Varghese | `delivery_head` — approves the hire | |
+
+Before 0031 the `app_user.role` CHECK admitted only `employee/manager/hr_admin`, so those two
+approver logins were **unseedable even in principle** — the chain has had no approvers for as
+long as the screen has existed. The CHECK now admits all seven.
+
+**`npm run db:seed` was NOT run, on purpose.** It is a full roster reset — it `DELETE`s every
+work log, punch, timesheet, leave ledger row, session and assistant transcript before
+re-inserting — and the live demo data was chosen over the fixtures. So pick one:
+
+- **Re-seed** (`npm run db:seed`) — gets all three people, SA0 passes, **destroys current demo
+  data**; or
+- **Targeted insert** of EMP006/007/008 with their `employment`, assignment and `user_role`
+  rows, lifted from `demo.sql` lines 270-340 and 405-409. Non-destructive, but must respect
+  Rule 3 and needs `hrm.allow_backdated_period` for the historical `valid_from`s.
+
+Until one is done, `/onboarding` renders correctly but **empty, and no annexure can be approved
+by anybody** — so "Prepare annexure" is the only exercisable action, against EMP001-005.
+
+## 2026-09-10 — DEC-166: "hi" answered as a leave question, and a prompt example sent verbatim
+
+**Caused by DEC-165, found minutes later.** The new zero-record rule carried two example
+sentences, and `hi` came back as **"You have not taken any leave this month."** — one of them,
+word for word. Two faults:
+
+1. **A greeting reached tool selection.** Selection is asked to choose a tool for whatever
+   arrives; `hi` names no subject, so the pick is arbitrary, and an arbitrary leave tool with
+   zero rows is then handed to the stage whose job is to write a sentence about it.
+   `GREETING` / `isGreeting()` in `assistant.controller.ts` now match a bare greeting **before
+   routing** and run `meta_capabilities` instead — gated normally, listing only what that actor
+   may ask, **not a refusal** (so the `no_tool` backlog stays a real signal and the
+   `tool_name IS NOT NULL OR refusal_code IS NOT NULL` check is satisfied). Both model calls are
+   skipped. Regex verified against 24 greetings and 11 near-misses (`hi, how many leaves…`,
+   `hire`, `history of my leaves`, `highlight my tasks` all correctly NOT greetings).
+2. **Example sentences in a prompt are sendable text.** The zero-record rule now describes the
+   SHAPE, not a finished sentence, and bans replying with anything from the instructions.
+   `selectSystemPrompt` also gained "small talk is not a question".
+
+**Build note, unrelated but blocking:** `npm run build -w @panasa/api` was failing with 9
+`Action`-union errors in `accounts.ts`/`onboarding.ts` because **`packages/authz/dist` was
+stale** — it predates the onboarding actions. `npm run build -w @panasa/authz` first, then the
+API builds clean. Both are now built.
+
+**The running processes are NOT restarted.** The API is `node dist/main.js` (not watch) and the
+web is `next start -p 3100`, so the fix is compiled but not live until someone restarts them —
+left alone deliberately, since the API process holds `HRM_LLM_API_KEY` from an environment this
+session cannot reproduce. **Next action: restart the API, then ask `hi`, `was <name> on leave
+yesterday`, and `how many leaves this month` against a real key.** `chat.noRows` also needs
+`npm run build -w @panasa/web`.
+
+**Still open (same class):** "ok", "thanks", "bye" route like questions.
+## 2026-09-10 — DEC-165: an empty result now reads as an absence, not as a failed search
+
+Reported from the demo: *"Was Vishnu leave yesterday?"* → **"Nothing matched. There are no
+records indicating whether Vishnu was on leave yesterday."** Two sentences, both about the
+lookup, neither of them the answer. Wording only, three places:
+
+- `apps/api/src/assistant/answer.ts` — `ANSWER_SYSTEM_PROMPT` no longer says "say plainly that
+  nothing matched". The zero-record rule now asks for **one sentence in the words of the
+  question** ("Vishnu was not on leave yesterday."), bans record/result/lookup/matching/search
+  talk, bans the verdict-then-explanation shape, and bans claiming the SUBJECT does not exist —
+  an empty leave result means no leave, not no Vishnu.
+- Same file, `buildAnswerPayload` — the same instruction is added to the header **next to
+  `Total rows found: 0`**, which is the line the model otherwise reports.
+- `deterministicSentence(0, …)` and `chat.noRows` (en + ar) → "I could not find anything for
+  that." First person is right there: that path IS the system speaking about itself.
+
+Nothing about scoping, masking or refusals moved. The out-of-reach refusal (DEC-142) still runs
+before this, so a named person outside the caller's reach is still a refusal and never
+"not on leave". **Not yet exercised against a live model** — the red-team drives no model and
+asserts nothing about this string, so the next session should ask the four demo questions
+(named person / self / this month / a project with no rows) against a real key and check that no
+answer opens with a verdict. Pre-existing `tsc` errors in `accounts.ts` and `onboarding.ts`
+(stale permission union) are untouched and unrelated.
+
 ## 2026-09-09, latest: ONB-01 the onboarding approval chain
 
 Asked for: "employee creation, documents upload, payslip creation, send payslip to finance head

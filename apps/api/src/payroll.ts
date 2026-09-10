@@ -103,6 +103,43 @@ export const toPaise = (input: unknown, field: string): bigint => {
   return sign === '-' ? -paise : paise;
 };
 
+/**
+ * Integer paise to a rupee string with Indian digit grouping: `12345678` -> `1,23,456.78`.
+ *
+ * THE INVERSE OF `toPaise`, AND FLOAT-FREE FOR THE SAME REASON (Rule 4). The digits are sliced as
+ * TEXT and never divided - `paise / 100` would introduce the binary error `toPaise` exists to
+ * avoid, at the last step, on the value a person reads.
+ *
+ * IT IS A DELIBERATE SECOND COPY of `formatPaise` in `apps/web/components/payslips.tsx`, and the
+ * duplication is the lesser evil rather than an oversight. ADR-0021 section 2 requires a pay
+ * sentence to be composed IN THE API so that no figure is sent to a model provider, and the web
+ * copy cannot be imported across the workspace boundary without making the API depend on the
+ * frontend. The two are pinned to each other by `pay:test`, which checks the same inputs against
+ * both groupings - because the web copy already shipped one bug of exactly this kind
+ * (`(\d{2})+` where Indian grouping needs `(\d{2})*`, rendering a six-figure amount as
+ * `1,00000.00` on the screen where somebody approves it).
+ *
+ * `null` becomes an em dash, matching the web copy, so a missing figure never renders as `0.00` -
+ * "nothing recorded" and "zero rupees" are different facts about somebody's pay.
+ */
+export const formatPaise = (paise: string | number | bigint | null | undefined): string => {
+  if (paise === null || paise === undefined || paise === '') return '—';
+  const s = String(paise);
+  const neg = s.startsWith('-');
+  const digits = (neg ? s.slice(1) : s).replace(/\D/g, '').padStart(3, '0');
+  const whole = digits.slice(0, -2);
+  const frac = digits.slice(-2);
+  // The last three digits, then pairs: 1234567 -> 12,34,567. `(\d{2})*` and not `(\d{2})+`.
+  const grouped = whole.replace(/\B(?=(\d{2})*(\d{3})$)/g, ',');
+  return `${neg ? '-' : ''}${grouped}.${frac}`;
+};
+
+/** `formatPaise` with the currency symbol, for a sentence rather than a table cell. */
+export const rupees = (paise: string | number | bigint | null | undefined): string => {
+  const v = formatPaise(paise);
+  return v === '—' ? 'not recorded' : `₹${v}`;
+};
+
 @Controller('payslips')
 export class PayrollController {
   constructor(

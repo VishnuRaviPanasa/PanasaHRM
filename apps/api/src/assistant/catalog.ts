@@ -31,8 +31,19 @@ import { z } from 'zod';
 import type { Db } from '../db';
 import type { Authz } from '../authz';
 
-/** The seven routing domains. Mirrors ck_assistant_message_domain in migration 0029. */
-export const DOMAINS = ['me', 'leave', 'attendance', 'work', 'people', 'documents', 'cross'] as const;
+/**
+ * The nine routing domains. MIRRORS `ck_assistant_message_domain`, which is a closed set.
+ *
+ * The constraint arrived in the migration originally numbered 0029 and now numbered 0035
+ * (DEC-167 - it was renamed to resolve a merge collision and the database row was relabelled to
+ * match); `onboarding` was added by migration 0036 and `pay` by 0037 (ADR-0021).
+ *
+ * THE TWO LISTS MUST MOVE TOGETHER, and the failure mode if they do not is the worst available:
+ * the transcript INSERT happens at the END of a turn, so a domain the router can reach but the
+ * constraint rejects answers the user first and fails the audit row afterwards.
+ */
+export const DOMAINS = ['me', 'leave', 'attendance', 'work', 'people', 'documents', 'cross',
+  'onboarding', 'pay'] as const;
 export type Domain = (typeof DOMAINS)[number] | 'meta';
 
 /**
@@ -48,6 +59,55 @@ export interface ToolResult {
   readonly rows: readonly Record<string, unknown>[];
   /** Shown above the table. Used for k-suppression and for stating an applied default. */
   readonly note?: string;
+  /**
+   * THIS RESULT IS ABOUT PERMISSIONS, NOT ABOUT DATA. The controller refuses the turn with this
+   * exact text - `not_permitted`, no model call - instead of asking a model to write a sentence
+   * about an empty table.
+   *
+   * IT EXISTS BECAUSE A NOTE WAS NOT ENOUGH (DEC-170). An employee asked "is any onboarding
+   * pending?", which they hold no grant to ask, and the reply was **"I have nothing for
+   * onboarding pending."** above a correct note explaining they cannot see onboarding. Two
+   * problems, and the second is the real one:
+   *
+   *   1. The note is rendered as secondary text, and the sentence above it is what people read.
+   *   2. A MODEL WAS BEING ASKED TO WRITE THE SENTENCE AT ALL. Whether an answer is about data
+   *      or about permissions is not a judgement to delegate - it is known, exactly, before any
+   *      prompt is built. DEC-142(b) already established the right shape for the sibling case:
+   *      a named person out of reach becomes a deterministic refusal, which is why "Priya Menon
+   *      is outside what your account can see" has always read correctly.
+   *
+   * So this is the same device, moved to where a TOOL can reach it: the tool knows the topic was
+   * refused, and says so, rather than encoding it in rows a model then paraphrases. Every tool
+   * remains a SELECT and nothing here grants a tool the power to refuse an action - the
+   * authorization decision has already happened in `gateTool`; this only decides how the outcome
+   * is worded.
+   */
+  readonly notPermitted?: string;
+  /**
+   * THE ANSWER, WRITTEN BY OUR OWN CODE. When set, the controller sends this as the reply and
+   * **never builds an answer payload or calls the provider for this turn**.
+   *
+   * ADR-0021 SECTION 2 IS THE WHOLE REASON IT EXISTS. The assistant may now report pay, on one
+   * condition: *"NO PAY FIGURE IS SENT TO A MODEL PROVIDER."* DEC-140 composes answers FROM the
+   * masked row values, which are transmitted to `gpt-4o-mini` outside India - ADR-0020 section 3
+   * names `question_text` as *"the only column in this database transmitted outside India"*, and
+   * a salary must not become the second. So a tool carrying money writes its own sentence and
+   * the figure goes from PostgreSQL to the authenticated caller's browser and nowhere else.
+   *
+   * THE ABSENCE OF `modelPayload` IS THE CHECKABLE FORM OF THAT PROMISE, which is why the
+   * controller skips the payload rather than building one and discarding it: the red team
+   * asserts a money tool produced no payload at all, so the guarantee is a property of the code
+   * rather than a claim in a comment.
+   *
+   * THE COST IS REAL AND WAS ACCEPTED: these sentences are hand-written and read flatter than
+   * model prose, and they need maintaining as columns change. For a compensation figure,
+   * deterministic and plain beats fluent and paraphrased - a model cannot round, soften or
+   * invent what it never receives.
+   *
+   * A tool sets EITHER this or nothing. It is not a fallback for a failed model call; that is
+   * `deterministicSentence`, which reports a degraded mode and says so.
+   */
+  readonly sentence?: string;
 }
 
 export interface ToolCtx {
@@ -89,6 +149,24 @@ export interface ToolSpec<A extends z.ZodTypeAny = z.ZodTypeAny> {
    * The bar for setting this is exact: NO argument that names a person, and SQL that filters on
    * `ctx.employeeId` in addition to - never instead of - `scope()`.
    */
+  /**
+   * THIS TOOL CARRIES A COMPENSATION FIGURE. ADR-0021 section 2.
+   *
+   * It is a property of the TOOL and deliberately not of its routing domain, which was the first
+   * design and was wrong twice over. `onboarding_annexure_amounts` had to move from `pay` to
+   * `cross` to be reachable (see its own comment), and a guarantee that moved with a ROUTING
+   * LABEL was a guarantee resting on the wrong thing entirely - the question "may this figure
+   * reach a provider?" has nothing to do with which blurb the router matched.
+   *
+   * Two things key off it, and between them they make ADR-0021 section 2 structural:
+   *
+   *   1. The controller REFUSES a money tool that produced no `sentence`, rather than falling
+   *      through to the answer path. So the only way for a money tool to answer is to write its
+   *      own sentence; forgetting to is a loud refusal, not a silent transmission.
+   *   2. `/assistant/capabilities` publishes it, and the red team asserts that every tool
+   *      declaring it produced NO `modelPayload`, at every role.
+   */
+  readonly money?: true;
   readonly selfOnly?: boolean;
   /**
    * What a question that names NOBODY means for this tool.

@@ -57,6 +57,25 @@ const PAY = (): FieldRule => R('RESTRICTED', ['hr_admin', 'finance'], true);
  */
 const CONFIG = (): FieldRule => R('PUBLIC_INTERNAL', ['hr_admin', 'hr_ops', 'auditor'], false);
 
+/*
+ * The onboarding approval chain. The role list is exactly the `onboarding.annexure.read` cells -
+ * hr_admin, finance, auditor, delivery_head - and `self` is FALSE, which is the unusual half.
+ *
+ * Every other rule in this file lets the subject read their own value. Here the matrix says the
+ * opposite in terms: the reader is "whoever has to act on it ... Deliberately NOT the subject,
+ * and not their line manager - a package under review is not team information." `fieldMask`
+ * consults `isSubject` BEFORE it consults roles, so `self: true` would have handed a joiner
+ * their own annexure through any tool that reached this resource, silently reversing a matrix
+ * cell from a file the matrix does not mention.
+ *
+ * `neverInList` is not set, for the reason PAY gives: it exists to stop bulk exfiltration
+ * through a list endpoint, and the onboarding QUEUE is legitimately a list - the whole screen is
+ * one. The control against bulk reads here is the row scope plus the audit row per access, and
+ * the fact that no figure is registered at all.
+ */
+const ANNEXURE = (): FieldRule =>
+  R('RESTRICTED', ['hr_admin', 'finance', 'auditor', 'delivery_head'], false);
+
 const REGISTRY: Partial<Record<ResourceType, Record<string, FieldRule>>> = {
   payslip: {
     id: PAY(),
@@ -159,6 +178,123 @@ const REGISTRY: Partial<Record<ResourceType, Record<string, FieldRule>>> = {
 
     // NOTE: password_hash, token_hash and anything else credential-shaped appear NOWHERE in this
     // registry, so they can never be serialized by any role including the subject.
+  },
+
+  /*
+   * The onboarding annexure. ADR-0020 (the onboarding boundary) + ADR-0020 (the runtime
+   * assistant).
+   *
+   * THE MONEY COLUMNS ARE DELIBERATELY ABSENT, and their absence is the load-bearing control
+   * rather than a preference. `declared_annual_ctc_minor`, `amount_minor` and
+   * `ctc_at_decision_minor` are NOT registered, so the default-deny mask drops them for every
+   * role including `finance` - and a tool that writes one into its own SELECT list gets a row
+   * without it rather than an error. That is the same device the `attendance_punch` entry uses
+   * for coordinates, and it is what makes the assistant ADR's "no tool reads compensation"
+   * structural instead of aspirational:
+   *
+   *     "Forbidden regardless of any later decision: any AI input to hiring, promotion,
+   *      compensation, performance rating, discipline or termination"
+   *
+   * carried forward from ADR-0014 "verbatim and unweakened", by an ADR that says in terms that
+   * it does not have the authority to relax it.
+   *
+   * SO WHY REGISTER THE RESOURCE AT ALL? Because the approval CHAIN is not the money. Which
+   * stage an annexure has reached, when the joiner is proposed to start, who prepared it, who
+   * approved it and whether the letter has gone out are process facts that the three people in
+   * the chain already read on `/onboarding`, and there was no way to ask about them. Registering
+   * the process columns and omitting the figures splits the record along the line ADR-0020
+   * already draws when it insists this is "an ANNEXURE, not a payslip".
+   *
+   * THE ROLE LIST MIRRORS `onboarding.annexure.read` AND NOTHING WIDER: hr_admin, finance,
+   * auditor, delivery_head. `self` is FALSE on every field, which is not an oversight - the
+   * matrix note is explicit that the subject is "deliberately NOT" admitted, and "not their line
+   * manager - a package under review is not team information". A `self: true` here would be the
+   * one line that quietly reversed that, because the mask is asked `isSubject` before it is
+   * asked about roles.
+   *
+   * RESTRICTED rather than PERSONAL: an offer under review is need-to-know even among people who
+   * hold every other HR field. `hr_ops` reads the rest of this employee's record and is denied
+   * this, exactly as it is denied pay.
+   */
+  salary_annexure: {
+    id: ANNEXURE(),
+    employee_id: ANNEXURE(),
+    // Who the offer is for. Already visible to these four roles in the directory.
+    employee_number: ANNEXURE(),
+    full_name: ANNEXURE(),
+    // Where it is in the chain, and how it got there.
+    status: ANNEXURE(),
+    /*
+     * Whose move it is, derived from `status` in SQL. It MUST be registered even though it is
+     * computed rather than stored - the mask drops what it does not know, so the first run of
+     * `onboarding_annexure_status` returned every other column and silently no `waiting_on`,
+     * which is DEC-138's trap arriving exactly where its comment says it will. A derived column
+     * is a field as far as this registry is concerned.
+     */
+    waiting_on: ANNEXURE(),
+    prepared_by_name: ANNEXURE(),
+    created_at: ANNEXURE(),
+    updated_at: ANNEXURE(),
+    // The date the OFFER assumes. Not `employee.joined_on`, which is what actually happened -
+    // migration 0032 keeps them apart on purpose and so does this.
+    proposed_joining_on: ANNEXURE(),
+    // Whether a letter exists, never where it is stored. `offer_document_id` is absent for the
+    // same reason `object_key` is absent below: an identifier invites a direct fetch, and the
+    // documents module has its own gate that this resource must not let anybody skip.
+    has_offer_letter: ANNEXURE(),
+    // The event trail. `ctc_at_decision_minor` sits on the same row in the database and is NOT
+    // registered, which is the point of enumerating these individually.
+    event_type: ANNEXURE(),
+    from_status: ANNEXURE(),
+    to_status: ANNEXURE(),
+    actor_name: ANNEXURE(),
+    decided_at: ANNEXURE(),
+    // Why an approver sent it back. Free text a human typed about a named person, so it is
+    // readable by the chain and by nobody else - it is already on the /onboarding timeline.
+    reason: ANNEXURE(),
+
+    /*
+     * THE MONEY, ADDED BY ADR-0021 - and it was absent by design until a human decided
+     * otherwise, which is the part worth preserving in this comment.
+     *
+     * DEC-168 left these three columns unregistered so that ADR-0020 section 6's *"no tool reads
+     * compensation"* was structural rather than aspirational: default-deny meant a tool could
+     * write `declared_annual_ctc_minor` into its own SELECT list and still get a row without it.
+     * The product owner then asked for the opposite in terms - *"hr have option to see
+     * everyibnes salary"* - and ADR-0021 supersedes that bullet, narrowly.
+     *
+     * WHAT DID NOT CHANGE IS WHO. The role list is `ANNEXURE()`, unchanged: `hr_admin`,
+     * `finance`, `auditor`, `delivery_head`, and `self: false`. So the joiner still cannot read
+     * their own annexure and neither can their line manager - the matrix cells that say so were
+     * not touched, and a figure is visible to exactly the four accounts that already approve it
+     * on `/onboarding`.
+     *
+     * ADR-0021 SECTION 2 IS WHAT MAKES THIS SAFE TO REGISTER: a tool returning these composes
+     * its own sentence, so the value reaches the caller's browser and never a model provider.
+     * Registering the column is what lets the API read it; it is not what decides where it goes.
+     */
+    declared_annual_ctc_minor: ANNEXURE(),
+    amount_minor: ANNEXURE(),
+    /*
+     * What the figures WERE at the moment of a decision (migration 0032). Registered with the
+     * rest because an approval trail that says "finance approved" and cannot say what it
+     * approved is the specific gap 0032 added the column to close.
+     */
+    ctc_at_decision_minor: ANNEXURE(),
+    // Component identity, so a breakup reads as labelled lines rather than bare numbers.
+    kind: ANNEXURE(),
+    component_code: ANNEXURE(),
+    label: ANNEXURE(),
+
+    /*
+     * STILL NO AGGREGATE COLUMN, and ADR-0021 does not change this. "How many are waiting on
+     * finance" is answered by returning the rows and letting the reader count them, because an
+     * aggregate crossing an individual boundary is what ADR-0017 amendment (d) puts behind a
+     * k = 5 minimum - and a queue of three real hires would be suppressed to nothing for a
+     * reader who can already see all three on screen. **No SUM of pay exists here either**: a
+     * total payroll cost is a different question from four people's offers, and ADR-0021
+     * section 3 keeps comparison and aggregation of pay out of the catalogue entirely.
+     */
   },
 
   employee_document: {

@@ -125,7 +125,19 @@ export const ANSWER_SYSTEM_PROMPT = [
   '  you write must appear verbatim in a record or in the note. If a total is not given to you,',
   '  do not state one - say what the records show and stop.',
   '- If the records do not answer the question, say so plainly and say what they do show.',
-  '- If there are no records, say plainly that nothing matched.',
+  '- IF THERE ARE NO RECORDS, do not report that. Answer the question itself, as an absence,',
+  '  in ONE short sentence built from the SUBJECT and PERIOD THE QUESTION NAMED - if it asked',
+  '  about one person on one day, say that person was not on leave that day. Never mention',
+  '  records, results, data, lookups, matching, searching or the system; never open with a',
+  '  verdict such as "Nothing matched" and then explain it; never add a second sentence.',
+  '  Claim ONLY the absence that was asked about - never that the person, project or thing',
+  '  itself does not exist.',
+  '- NEVER REPLY WITH A SENTENCE TAKEN FROM THESE INSTRUCTIONS. Every example here is a shape',
+  '  to follow, never text to send. If the question named no subject you can put in the',
+  '  sentence, you have nothing to answer - say only that you have nothing for it.',
+  '- IF THE MESSAGE IS A GREETING rather than a question, greet the person back briefly',
+  '  and say what you can look up, using the subjects in the records. Do not answer anything',
+  '  they did not ask.',
   '- Answer in the same language the question was asked in.',
   '- No advice, no caveats, no offers of further help, no remarks about a person.',
   '- Never rank, score, compare or evaluate people, whatever the records contain.',
@@ -190,6 +202,12 @@ export function buildAnswerPayload(input: {
       ? `Records given to you below: ${sent} of ${rows.length}. Say that your answer covers the ` +
         `first ${sent}, and that the table beside it has all ${rows.length}.`
       : `Records given to you below: all ${rows.length}.`,
+    // The zero-row turn is the one the prompt is most often ignored on, because "found: 0"
+    // reads as the thing to report. Say here, next to the count, that it is not.
+    rows.length === 0
+      ? 'Nothing is on file for that. Answer as an absence in ONE short natural sentence, in '
+        + 'the words of the question, mentioning neither records nor searching.'
+      : null,
     note ? `Note that must be conveyed: ${sanitizeValue(note)}` : null,
   ].filter(Boolean).join('\n');
 
@@ -220,7 +238,7 @@ export function deterministicSentence(
   rowCount: number,
   reason: 'failed' | 'disabled',
 ): string {
-  if (rowCount === 0) return 'Nothing matched that.';
+  if (rowCount === 0) return 'I could not find anything for that.';
   const found = `${rowCount} ${rowCount === 1 ? 'record' : 'records'}`;
   return reason === 'failed'
     ? `Your records hold ${found} for that, but the answer could not be written just now. ` +

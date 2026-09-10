@@ -59,6 +59,8 @@ import './tools-leave';
 import './tools-attendance';
 import './tools-people';
 import './tools-work';
+import './tools-onboarding';
+import './tools-pay';
 import './tools-meta';
 
 /** Mirrors ck_assistant_message_refusal in migration 0029. Changing one needs the other. */
@@ -76,6 +78,14 @@ const DOMAIN_BLURB: Record<Domain, string> = {
   work: 'Projects, tasks, effort in minutes, timesheets.',
   people: 'The employee directory, departments, designations, reporting lines, headcount, joiners and leavers.',
   documents: 'Documents on file for an employee - metadata only, never content.',
+  onboarding:
+    'New joiners before and around their start date: the salary annexure\'s approval chain and ' +
+    'which stage it has reached, what is waiting on finance or the delivery head, proposed ' +
+    'joining dates, and who approved or rejected an offer. These report PROGRESS only - for the CTC or the salary components in an annexure there is a separate tool, always available.',
+  pay:
+    'Money that has been paid or offered: payslips with net, gross and deductions, the payslip ' +
+    'PDF, and the CTC in a new joiner\'s salary annexure. One person at a time - never a ' +
+    'comparison, a ranking or a total.',
   cross: 'Questions spanning two areas at once, such as attendance against logged effort, or a full picture of one person over a period.',
   meta: 'What the assistant itself can do, or a question that needs clarifying before it can be answered.',
 };
@@ -88,12 +98,56 @@ const DOMAIN_BLURB: Record<Domain, string> = {
  * discipline or termination; no productivity or sentiment scoring. ADR-0017 adds that work-log
  * analysis attributed to named individuals is forbidden.
  *
+ * ---------------------------------------------------------------------------
+ * THE PAY PATTERNS WERE REMOVED FROM THIS LIST BY ADR-0021, AND THAT IS NOT A LOOSENING
+ * ---------------------------------------------------------------------------
+ *
+ * ADR-0020 was explicit that this list *"was never more than a way of giving a clear no instead
+ * of a confusing one"* - the actual control being that **no pay tool existed**. ADR-0021 adds
+ * pay tools ("everybody should have the option to see their salary. and hr have option to see
+ * everyibnes salary"), so that control is gone, and a ROLE-BLIND PHRASE LIST CANNOT REPLACE IT:
+ *
+ *   "what is the salary of EMP006"  must be ANSWERED for hr_admin and finance
+ *                                   must be REFUSED for an employee or a line manager
+ *
+ * One string, two correct outcomes, decided by `payroll.payslip.read` and by nothing else. A
+ * regex that blocked it would refuse HR the register they are entitled to; a regex that allowed
+ * it would decide nothing, because `assertCan` and `scope()` still run. So pay lookups now go
+ * where CLAUDE.md rule 1 says they belong - `AuthorizationService` - and an employee asking about
+ * a colleague meets DEC-142(b)'s refusal, *"Priya Menon is outside what your account can see"*,
+ * which is more accurate than the compensation refusal it replaces.
+ *
+ * THE ONBOARDING CARVE-OUT WENT WITH THEM. DEC-168 had to exempt "salary annexure" status
+ * questions from the `salary` topic patterns, and DEC-170's history is a chain of three fixes to
+ * that exemption. With the topic patterns gone the exemption has nothing to exempt, and roughly
+ * forty lines of interacting regex disappeared with it - which is the clearest evidence available
+ * that the phrase list was standing in for a decision it could not make.
+ *
+ * ---------------------------------------------------------------------------
+ * WHAT REMAINS, AND WHY EACH ONE IS FORBIDDEN FOR *EVERYBODY*
+ * ---------------------------------------------------------------------------
+ *
+ * ADR-0021 section 3 carries these forward unweakened. The test is no longer "is this about
+ * pay?" but "is there any role for which this would be legitimate?" - and for the following
+ * there is none, however much pay the asker may properly read:
+ *
+ *   RANKING AND ORDERING     A comparison across people is a judgement about them. ADR-0020:
+ *                            "the model controls no ORDER BY ... this removes the capability by
+ *                            making the operation unrepresentable". No pay tool orders by amount.
+ *   AGGREGATES OVER PAY      An average, a median or a total payroll figure is a different
+ *                            question from one person's payslip, and ADR-0017(d)'s k = 5 exists
+ *                            because small-group aggregates re-identify. No pay tool aggregates.
+ *   SCORING AND RATING       Productivity, performance, sentiment, appraisal rating. ADR-0014's
+ *                            core prohibition and untouched by ADR-0021.
+ *   HIRING AND FIRING        "Should I fire EMP001" asks a model to participate in a decision
+ *                            about a person's employment.
+ *
  * BE HONEST ABOUT WHAT THIS IS. A phrase list is a RULE, and this repo prefers a constraint. The
- * constraint is that the catalogue contains no tool that ranks, scores or orders people, no
- * payslip tool, and no narrative work-log content for anyone but its author - so a determined
- * paraphrase that gets past these patterns still has nothing to call. This list exists to give a
- * CLEAR ANSWER ("no, and here is why") rather than a confusing one ("I could not find a tool"),
- * and to make the refusal auditable as `forbidden_purpose` rather than `no_tool`.
+ * constraint is that the catalogue contains no tool that ranks, scores, orders or totals people,
+ * and no narrative work-log content for anyone but its author - so a determined paraphrase that
+ * gets past these patterns still has nothing to call. The list exists to give a CLEAR ANSWER
+ * ("no, and here is why") rather than a confusing one ("I could not find a tool"), and to make
+ * the refusal auditable as `forbidden_purpose` rather than `no_tool`.
  */
 const FORBIDDEN_PURPOSE = [
   /\b(rank|ranking|leaderboard|league table|top performer|worst performer)\b/i,
@@ -103,41 +157,70 @@ const FORBIDDEN_PURPOSE = [
   /\b(underperform|under.performing|slacking|slacker)\b/i,
   /\b(should|shall|can)\s+(i|we)\s+(fire|sack|terminate|dismiss|promote|demote)\b/i,
   /\b(fire|sack|terminate|dismiss)\s+(him|her|them|EMP\d+)\b/i,
-  /*
-   * PAY, IN TWO PARTS - because the first version blocked on the TOPIC, and that was wrong
-   * (DEC-142). `salary` alone caught "when is my salary credited?", a question about a
-   * payment DATE, and answered it with the full compensation refusal - which reads as an
-   * accusation and, worse, files a process question as `forbidden_purpose` so it never reaches
-   * the `no_tool` backlog that is meant to tell us what people actually want to ask.
-   *
-   * The line is AMOUNT-OR-RECORD versus SCHEDULE-OR-PROCESS. `payslip`, `ctc` and `bonus` name a
-   * figure whatever the sentence around them says, so they stay a flat block. `salary` and `pay`
-   * are topics, and become a compensation request only when the question wants a figure, a
-   * structure, or somebody else's.
-   *
-   * NOTHING IS LOOSENED BY THIS. There is no payslip tool and no payroll-calendar tool, so a
-   * pay question that gets through meets an empty catalogue and an honest refusal. ADR-0020
-   * s6 is the control - "the catalogue contains no payslip entity" - and this list was never
-   * more than a way of giving a clear no instead of a confusing one.
-   */
-  /\b(payslip|pay slip|ctc|compensation|bonus|increment|appraisal rating)\b/i,
-  /\b(salary|salaries|pay)\b[^?.!]{0,40}\b(amount|figure|structure|break[- ]?up|breakdown|net|gross|slip|hike|raise|revision)\b/i,
-  /\b(amount|figure|structure|break[- ]?up|breakdown|net|gross|hike|raise|revision)\b[^?.!]{0,40}\b(salary|salaries)\b/i,
-  // The lookahead is what lets a DATE question through: "what date is salary credited" asks
-  // when, "what is my salary" asks how much, and the words right after the verb are the only
-  // difference between them.
-  /\b(what|how much|show|tell|list|give|reveal|display)\b(?![^?.!]{0,25}\b(date|day|time|credit|credited|paid)\b)[^?.!]{0,40}\b(salary|salaries)\b/i,
-  /\b(salary|salaries|pay)\b[^?.!]{0,30}\b(of|for)\b[^?.!]{0,25}(EMP\d+|everyone|everybody|the team|all staff|all employees|my colleague)/i,
-  /\b(everyone|everybody|all)\s*['’]?s?\s+(salary|salaries|pay)\b/i,
-  // "how much does X earn", "what does X earn", "what is X paid", "what does X take home".
-  // The verb is the signal, not the noun: a question about pay rarely uses the word "salary".
-  /\b(how much|what)\b[\w' .]{0,40}\b(earn|earns|earning|make|makes|making|paid|take home|takes home)\b/i,
-  /\b(earn|earns|earning|paid|pay|salary)\b[\w' .]{0,20}\bEMP\d+\b/i,
+  // A performance RATING is ADR-0014's own example and is not a pay lookup.
+  /\b(appraisal|performance)\s+rating\b/i,
   /\b(sentiment|morale|attitude|engagement score)\s+(of|for|analysis)\b/i,
-  /\bwho\s+(earns|makes)\s+(the\s+)?most\b/i,
+
+  /*
+   * PAY AS A COMPARISON, A RANKING OR AN AGGREGATE - the part of the pay block that survives
+   * ADR-0021, and the only part. Each of these is refused for `hr_admin` too, which is the test
+   * that distinguishes them from a lookup: HR may read every payslip in the company one at a
+   * time and still may not ask the assistant who is paid the most.
+   */
+  /\bwho\s+(earns|earned|makes|made|is paid|are paid)\s+(the\s+)?(most|least|more|less|highest|lowest)\b/i,
+  /\b(highest|lowest|top|bottom|best|worst)[- ]?(paid|earning|earner|earners)\b/i,
+  /\b(highest|lowest|biggest|smallest)\s+(salary|salaries|pay|ctc|package)\b/i,
+  /*
+   * A RANKING OVER THE RECORD RATHER THAN OVER THE WORD "salary". "Which annexure is the
+   * highest?" asks what "who is paid the most?" asks, about a different noun - and the pay
+   * patterns above cannot see it because it names no pay word at all.
+   *
+   * The constraint is still the real control: `onboarding_annexure_amounts` describes ONE
+   * annexure and has no `ORDER BY` over an amount, so a phrasing that slips past this meets a
+   * tool that cannot rank rather than one that will. This exists so the answer is a clear no
+   * instead of a single arbitrary annexure.
+   */
+  /\b(highest|lowest|biggest|largest|smallest|best|worst)\b[^?.!]{0,20}\b(annexure|annexures|offer|offers|package|packages|joiner|joiners)\b/i,
+  /\b(annexure|annexures|offer|package|joiner)\b[^?.!]{0,20}\b(highest|lowest|biggest|largest|smallest)\b/i,
+  /\b(compare|comparison|compared|versus|vs\.?|against)\b[^?.!]{0,30}\b(salary|salaries|pay|ctc|package|earn|earns)\b/i,
+  /\b(salary|salaries|pay|ctc|package)\b[^?.!]{0,30}\b(compare|comparison|compared to|versus|vs\.?)\b/i,
+  /\b(average|mean|median|total|sum|aggregate)\s+(salary|salaries|pay|payroll|ctc|compensation)\b/i,
+  /\b(salary|pay|payroll|ctc)\s+(distribution|spread|range|bands?|benchmark|benchmarks?)\b/i,
+  /\bwho\s+(earns|is paid|makes)\s+more\s+than\b/i,
+  /\b(more|less)\s+than\s+(me|him|her|them|EMP\d+)\b[^?.!]{0,20}\b(salary|paid|earn|earns)\b/i,
+  /\b(salary|paid|earn|earns)\b[^?.!]{0,20}\b(more|less)\s+than\s+(me|him|her|them|EMP\d+)\b/i,
+  // A raise or a promotion RECOMMENDATION - a decision, not a record.
+  /\b(should|shall|can|could|would)\b[^?.!]{0,25}\b(raise|hike|increment|promote|promotion)\b/i,
+  /\b(recommend|suggest|propose)\b[^?.!]{0,25}\b(salary|pay|raise|hike|increment|ctc|package)\b/i,
+  /\b(what|how much)\b[^?.!]{0,25}\bshould\b[^?.!]{0,20}\b(be paid|earn|salary|ctc)\b/i,
 ];
 
 const forbiddenPurpose = (q: string): boolean => FORBIDDEN_PURPOSE.some((re) => re.test(q));
+
+/*
+ * A BARE GREETING IS NOT A QUESTION, and must never reach tool selection.
+ *
+ * "hi" was answered with "You have not taken any leave this month." The selection step is
+ * asked to choose a tool for whatever arrives, "hi" carries no subject to choose against, and
+ * a leave tool with an empty result then had a sentence written about it. Every stage behaved
+ * as designed and the answer was still an invention - the shape DEC-150 names: a fact the
+ * system does not hold, presented as one it does.
+ *
+ * MATCHED HERE RATHER THAN IN A PROMPT because a greeting is the one input whose handling
+ * must not depend on a model's judgement, and because it costs two model calls to discover
+ * that "hi" means nothing. The pattern anchors both ends: "hi" is a greeting, "hi, how much
+ * leave do I have?" is a question and routes normally.
+ *
+ * IT IS NOT A REFUSAL. The turn runs `meta_capabilities` for real - gated like any other
+ * tool, listing only what THIS actor may ask - so the reply says what the assistant is for
+ * instead of what it could not do, the transcript records a tool rather than a `no_tool`,
+ * and the `no_tool` backlog (which exists to show what people actually want) is not filled
+ * with hellos.
+ */
+const GREETING =
+  /^\s*(?:hi+|hey+|hell+o+|helo|hai|yo|namaste|namaskaram|salaam|salam|assalamu\s*alaikum|greetings|howdy|good\s*(?:morning|afternoon|evening|day))(?:\s+(?:there|team|hr|hrm|assistant|bot|all|everyone|folks))?\s*[!.,?~…-]*\s*$/i;
+
+const isGreeting = (q: string): boolean => GREETING.test(q);
 
 interface Turn {
   conversationId: string;
@@ -177,6 +260,8 @@ export class AssistantController {
       name: string; description: string; examples: string[]; action: string; resource: string;
       subjectDefault: 'asker' | 'scope';
       relatedPeople: boolean;
+      /** ADR-0021 s2. The red team asserts no answer payload is built for these. */
+      money: boolean;
     }[]> = {};
     for (const t of tools) {
       (byDomain[t.domain] ??= []).push({
@@ -191,6 +276,8 @@ export class AssistantController {
         resource: t.resource,
         subjectDefault: t.subjectDefault ?? 'asker',
         relatedPeople: t.relatedPeople === true,
+        // ADR-0021 s2 - the red team asserts no payload is built for these.
+        money: t.money === true,
       });
     }
     return {
@@ -275,6 +362,13 @@ export class AssistantController {
       parsed.data,
     );
 
+    // The same permissions wording as `/ask` (DEC-170). It has to be here too, or the red team
+    // and `assistant:onboarding` would exercise a path `/ask` does not have - the property that
+    // makes this endpoint a trustworthy gate is that it IS the same path.
+    if (result.notPermitted) {
+      return await refuse('not_permitted', result.notPermitted);
+    }
+
     const masked = this.maskRows(auth, actor.employeeId, tool, result.rows as Record<string, unknown>[]);
 
     if (masked.length > MAX_ROWS_RENDERED) {
@@ -314,6 +408,35 @@ export class AssistantController {
      * It discloses nothing: it is a serialisation of `rows`, three lines above, to the same
      * authenticated caller who just received them.
      */
+    /*
+     * A TOOL THAT WROTE ITS OWN SENTENCE HAS NO PAYLOAD, and this endpoint must say so rather
+     * than build one for inspection. ADR-0021 section 2's guarantee is "no pay figure is sent to
+     * a provider", and the red team proves it by asserting `modelPayload` is ABSENT for a money
+     * tool - which only means something if `/run` is the same path `/ask` takes. Constructing a
+     * payload here "just to show it" would make the gate prove the opposite of the promise.
+     */
+    const coverage = this.coverageNote(tool, actor.employeeId, masked);
+    const common = {
+      refusal: null,
+      tool: tool.name,
+      columns,
+      rows: masked,
+      rowCount: masked.length,
+      note: [result.note, coverage].filter(Boolean).join(' ') || null,
+    };
+
+    if (result.sentence) {
+      return { ...common, sentence: result.sentence, modelPayload: null };
+    }
+
+    // Fails closed exactly as `/ask` does - see the note there. A money tool with no sentence
+    // must never reach `buildAnswerPayload`, and this endpoint's whole value is being the
+    // identical path.
+    if (tool.money) {
+      return await refuse('provider_error',
+        'That figure could not be prepared just now. Nothing was sent anywhere.');
+    }
+
     const modelPayload = buildAnswerPayload({
       question: `[direct] ${tool.name}`,
       toolName: tool.name,
@@ -323,15 +446,8 @@ export class AssistantController {
       businessDate,
     });
 
-    const coverage = this.coverageNote(tool, actor.employeeId, masked);
-
     return {
-      refusal: null,
-      tool: tool.name,
-      columns,
-      rows: masked,
-      rowCount: masked.length,
-      note: [result.note, coverage].filter(Boolean).join(' ') || null,
+      ...common,
       modelPayload: {
         answerFromRows: this.llm.answerFromRows,
         system: ANSWER_SYSTEM_PROMPT,
@@ -440,30 +556,43 @@ export class AssistantController {
 
       const businessDate = await this.businessDate();
 
-      // ---- 3. route ------------------------------------------------------
-      const domain = await this.route(question, permitted);
-      turn.routeDomain = domain;
-      send('status', { stage: 'routing', domain });
+      // ---- 3. greeting, route, select ------------------------------------
+      // A greeting is answered with what this actor may ask, and skips both model calls: there
+      // is nothing in "hi" for a router to narrow or a selector to match. See GREETING above.
+      const greeting = isGreeting(question) && permitted.some((t) => t.name === 'meta_capabilities');
 
-      // ---- 4. select -----------------------------------------------------
-      // A null domain means the router declined to narrow - use everything this actor may call.
-      const candidates = domain === null
-        ? permitted
-        : permitted.filter((t) => t.domain === domain || t.domain === 'cross');
-      const pool = candidates.length > 0 ? candidates : permitted;
+      let selection: { toolName: string | null; toolArgs: Record<string, unknown> | null };
 
-      const selection = await this.llm.chat({
-        messages: [
-          { role: 'system', content: this.selectSystemPrompt(businessDate) },
-          { role: 'user', content: question },
-        ],
-        tools: pool.map(toSchema),
-        requireTool: false,
-        maxTokens: 300,
-      });
-      turn.model = selection.model;
-      turn.promptTokens += selection.promptTokens;
-      turn.completionTokens += selection.completionTokens;
+      if (greeting) {
+        turn.routeDomain = 'meta';
+        send('status', { stage: 'routing', domain: 'meta' });
+        selection = { toolName: 'meta_capabilities', toolArgs: {} };
+      } else {
+        const domain = await this.route(question, permitted);
+        turn.routeDomain = domain;
+        send('status', { stage: 'routing', domain });
+
+        // ---- 4. select ---------------------------------------------------
+        // A null domain means the router declined to narrow - use everything this actor may call.
+        const candidates = domain === null
+          ? permitted
+          : permitted.filter((t) => t.domain === domain || t.domain === 'cross');
+        const pool = candidates.length > 0 ? candidates : permitted;
+
+        const chosen = await this.llm.chat({
+          messages: [
+            { role: 'system', content: this.selectSystemPrompt(businessDate) },
+            { role: 'user', content: question },
+          ],
+          tools: pool.map(toSchema),
+          requireTool: false,
+          maxTokens: 300,
+        });
+        turn.model = chosen.model;
+        turn.promptTokens += chosen.promptTokens;
+        turn.completionTokens += chosen.completionTokens;
+        selection = { toolName: chosen.toolName, toolArgs: chosen.toolArgs };
+      }
 
       if (!selection.toolName) {
         return await finish({
@@ -534,6 +663,25 @@ export class AssistantController {
       );
 
       /*
+       * A PERMISSIONS OUTCOME IS WORDED HERE, NOT BY A MODEL (DEC-170).
+       *
+       * Checked before masking and before any answer call, because there is nothing to mask -
+       * the tool returned no rows and a sentence. Whether a reply is about data or about what
+       * the asker may ask is known exactly at this point, so delegating it to a model can only
+       * add a way to get it wrong: the first attempt at this left the model to infer it from
+       * rows and a note, and it wrote "I have nothing for onboarding pending" over a note
+       * saying the opposite.
+       *
+       * Same treatment as `namedSubjectOutOfReach` below, which is why "Priya Menon is outside
+       * what your account can see" has always read correctly. `not_permitted` is accurate and
+       * keeps this out of the `no_tool` backlog, which exists to show what people want that the
+       * catalogue lacks - this is not that.
+       */
+      if (result.notPermitted) {
+        return await finish({ code: 'not_permitted', message: result.notPermitted });
+      }
+
+      /*
        * ---- 8. mask, ALWAYS AS A LIST ------------------------------------
        *
        * `inList: true` even when one row comes back. `neverInList` exists to stop bulk
@@ -599,7 +747,45 @@ export class AssistantController {
         rowCount: masked.length,
       });
 
-      // ---- 9. answer, from the masked rows -------------------------------
+      /*
+       * ---- 9a. the tool wrote its own answer -----------------------------
+       *
+       * ADR-0021 section 2: a tool carrying PAY composes its own sentence, and this turn makes
+       * **no provider call at all**. Returning here is the guarantee - not a flag consulted
+       * inside `answer()`, because a payload built and then discarded is one refactor away from
+       * being sent, and "we do not build it" is checkable in a way that "we do not send it" is
+       * not. The red team asserts a money tool yields no `modelPayload`.
+       *
+       * The figure has therefore travelled from PostgreSQL to this authenticated caller's
+       * browser and nowhere else.
+       */
+      if (result.sentence) {
+        send('token', { text: result.sentence });
+        return await finish(null);
+      }
+
+      /*
+       * A MONEY TOOL THAT WROTE NO SENTENCE IS A BUG, AND IT FAILS CLOSED.
+       *
+       * Every return path in `tools-pay.ts` sets `sentence`, so this is unreachable today - which
+       * is exactly when to write it, because the alternative is a future edit adding a fourth
+       * return path and silently posting a salary to `gpt-4o-mini`. ADR-0021 section 2 is a
+       * promise about where figures go; a promise kept only by every branch of one file
+       * remembering to is not structural.
+       *
+       * `provider_error` rather than a new code: the closed set is mirrored by
+       * `ck_assistant_message_refusal` in the database, so inventing one here would fail the
+       * transcript INSERT at the end of the turn - the trap 0036 and 0037 exist to describe. The
+       * message says what actually happened rather than blaming the provider.
+       */
+      if (tool.money) {
+        return await finish({
+          code: 'provider_error',
+          message: 'That figure could not be prepared just now. Nothing was sent anywhere.',
+        });
+      }
+
+      // ---- 9b. answer, from the masked rows ------------------------------
       //
       // AFTER the table has been sent, deliberately. The rows are already on their way to the
       // browser, so this call can only add a sentence: it cannot alter, delay or suppress the
@@ -828,14 +1014,40 @@ export class AssistantController {
       '"next Monday") against that date and pass explicit YYYY-MM-DD values.',
       '',
       'Choose exactly one tool. If no tool fits the question, choose none - do not force one.',
+      'A greeting, a thank-you or small talk is not a question about records. Choose no tool for',
+      'it, and never a tool whose subject the message did not mention.',
       'Never invent an employee number. If the question names a person without a number, pass',
       'the name in nameQuery and let the system resolve it.',
       '',
       'You cannot change anything: there is no tool that applies for leave, approves anything,',
       'or edits a record. If asked to do something like that, choose no tool.',
       '',
-      'You have no access to pay, salary or compensation, and there is no tool that ranks,',
-      'scores or compares people. Choose no tool for such questions.',
+      /*
+       * ADR-0021: pay IS answerable now, within what the asker's own policy allows - so the
+       * flat denial that used to sit here would make the model refuse questions the catalogue
+       * can answer. What replaces it is the part that did NOT change: one person at a time,
+       * never a comparison or a total.
+       */
+      /*
+       * "ONLY EVER FOR ONE PERSON AT A TIME" WAS HERE AND IT WAS WRONG (DEC-172).
+       *
+       * Reported: "proposed ctc for hisham?" answered, "proposed ctc for candidate?" refused with
+       * `no_tool`. The tool was a candidate both times - the sentence above was telling the model
+       * that a pay question naming nobody is not answerable, so it correctly declined to pick
+       * anything.
+       *
+       * I had conflated two different rules. **Do not COMPARE people** is ADR-0021 section 3 and
+       * is real. **Only one person at a time** is not a rule anywhere: HR reads the whole
+       * onboarding queue on `/onboarding`, and a list of records is not a comparison of them.
+       * The prompt now says the rule that exists.
+       */
+      'You can look up pay - a payslip, or the CTC in a new joiner\'s annexure. A question that',
+      'names nobody is fine: it means the asker themselves for a payslip, and every candidate',
+      'they may see for an annexure.',
+      'What no tool can do is RANK, SCORE, COMPARE, AVERAGE or TOTAL people, by pay or by',
+      'anything else - choose no tool for such a question. Listing records is not comparing them.',
+      'Authorization decides whose pay the asker may see, so choose the tool the question fits',
+      'and let the system refuse if they may not.',
     ].join('\n');
   }
 

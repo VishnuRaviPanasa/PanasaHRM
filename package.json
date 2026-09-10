@@ -49,8 +49,9 @@
     "browser:test": "node testing/demo/browser-verify.mjs",
     "assistant:test": "node testing/demo/assistant-flow.test.mjs",
     "assistant:redteam": "node testing/assistant/redteam.test.mjs",
-    "accounts:test": "node testing/demo/accounts.test.mjs",
-    "onboarding:test": "node testing/demo/onboarding.test.mjs"
+    "assistant:accuracy": "node testing/assistant/accuracy.test.mjs",
+    "assistant:onboarding": "node testing/demo/onboarding-assistant.test.mjs",
+    "pay:test": "node testing/demo/pay-assistant.test.mjs"
   },
   "devDependencies": {
     "prettier": "^3.3.3",

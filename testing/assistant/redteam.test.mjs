@@ -142,6 +142,7 @@ console.log('0. Reachable-people sets, per scope family, from independently-scop
 
 const ACTORS = {};
 const REACH = {};        // label -> { reporting:Set, directory:Set, documents:Set }
+let ORGANISATION = new Set();   // the roster - the bound for organisation-scoped resources
 let CATALOGUE = [];      // [{ name, action, resource }]
 
 for (const [label, email] of Object.entries(ACCOUNTS)) {
@@ -166,13 +167,28 @@ for (const [label, email] of Object.entries(ACCOUNTS)) {
   REACH[label] = { reporting, directory, documents: reporting };
 
   const caps = await call('/assistant/capabilities');
-  const tools = Object.values(caps.body?.domains ?? {}).flat();
+  // The DOMAIN IS THE GROUPING KEY, not a field on the tool - it has to be carried down or
+  // every domain-based check below is vacuous.
+  const tools = Object.entries(caps.body?.domains ?? {})
+    .flatMap(([domain, list]) => (list ?? []).map((t) => ({ ...t, domain })));
   if (tools.length > CATALOGUE.length) {
-    CATALOGUE = tools.map((t) => ({ name: t.name, action: t.action, resource: t.resource }));
+    CATALOGUE = tools.map((t) => ({ name: t.name, action: t.action, resource: t.resource, domain: t.domain, money: t.money }));
   }
   console.log(`   ${label.padEnd(9)} ${actor.employeeNumber}  reporting=${[...reporting].sort().join(',') || '(none)'}` +
     `  directory=${directory.size}  | ${tools.length} tool(s) offered`);
 }
+
+/*
+ * Built AFTER the loop, from the one role whose `/employees` is the whole roster. Asserted
+ * rather than assumed: if `hr_admin` ever stops seeing the full directory this set silently
+ * shrinks, and an organisation-scoped tool would then be judged against a bound that is too
+ * narrow - failing loudly here is the intended outcome, but a vacuous PASS is not.
+ */
+ORGANISATION = REACH.hr_admin?.directory ?? new Set();
+check('the organisation oracle is the full roster',
+  ORGANISATION.size >= REACH.hr_admin?.reporting?.size,
+  `hr_admin sees ${ORGANISATION.size} in the directory but ${REACH.hr_admin?.reporting?.size} ` +
+  'in the reporting graph - the organisation bound must be at least as wide');
 
 CATALOGUE.sort((a, b) => a.name.localeCompare(b.name));
 const ALL_TOOLS = CATALOGUE.map((t) => t.name);
@@ -180,6 +196,32 @@ check('the catalogue is non-empty', ALL_TOOLS.length > 0);
 check('every catalogue entry publishes the action it reuses',
   CATALOGUE.every((t) => typeof t.action === 'string' && t.action.length > 0),
   'without this the mapping below is guesswork');
+
+/*
+ * THE ORGANISATION SET - the fourth scope shape, and the reason it cannot reuse `directory`.
+ *
+ * `onboarding.annexure.read` is `orgRows(ctx, ['hr_admin','finance','delivery_head','auditor'])`,
+ * which is **ALLOW_ALL for those four roles and DENY_ALL for everybody else**. That is the same
+ * row shape as the directory, and the annexure tools were initially judged against `reporting`
+ * by falling through the mapping below - so a finance head reading the queue looked like a leak
+ * of everybody except EMP003.
+ *
+ * IT IS DELIBERATELY NOT THE PER-CALLER `directory` SET, even though that set currently happens
+ * to hold the whole roster for every role. It holds it for the WRONG REASON: `/employees` is
+ * `@Authenticated()` with a hand-written column allowlist and asks `assertCan` nothing about
+ * listing, so the matrix's `finance: deny, auditor: deny, delivery_head: deny` on
+ * `people.employee.list` is not enforced there at all. Borrowing that set would make the bound
+ * on an annexure tool depend on an unrelated endpoint's missing gate - so it would silently
+ * TIGHTEN the day somebody fixes `/employees`, and start failing these tools for reading rows
+ * their own policy allows.
+ *
+ * The bound therefore comes from the annexure's own policy: ALLOW_ALL means the organisation,
+ * and the roster is what that is. BE HONEST THAT THIS IS WEAKER than `reporting`: for these four
+ * roles it asserts only that no tool returns somebody who is not an employee here. What carries
+ * the weight for everybody else is that `employee`, `manager` and `hr_ops` hold no grant at all,
+ * so section 1 sees them refused and returning no rows - the narrow assertion is still made,
+ * where it is actually true.
+ */
 
 /** Which reach set governs a tool, from the resource it declares. */
 const familyOf = (resource) =>
@@ -190,7 +232,9 @@ const familyOf = (resource) =>
   (resource === 'employee' || resource === 'department' || resource === 'team') ? 'directory'
     : resource === 'employee_document' ? 'documents'
       : resource === 'org_config' ? 'none'
-        : 'reporting';
+        // The annexure is organisation-scoped for the four roles that may read one. See above.
+        : resource === 'salary_annexure' ? 'organisation'
+          : 'reporting';
 
 {
   const fams = {};
@@ -220,7 +264,11 @@ for (const [label, email] of Object.entries(ACCOUNTS)) {
       `HTTP ${r.status} ${JSON.stringify(r.body).slice(0, 160)}`)) continue;
 
     const family = familyOf(t.resource);
-    const allowed = family === 'none' ? new Set() : REACH[label][family];
+    // 'organisation' is a property of the RESOURCE, so it is the same set for every role -
+    // unlike the other three, which are looked up per caller.
+    const allowed = family === 'none' ? new Set()
+      : family === 'organisation' ? ORGANISATION
+        : REACH[label][family];
     const leaked = [...peopleIn(r.body)].filter((n) => !allowed.has(n));
     check(`[${label}] ${t.name} leaks nobody (${family} scope)`, leaked.length === 0,
       `returned ${leaked.join(',')}; ${label} may reach ${[...allowed].sort().join(',') || '(nobody)'}`);
@@ -305,19 +353,62 @@ console.log('\n4. Columns that must never appear in any answer, for any role');
 const BANNED = [
   'latitude', 'longitude', 'accuracy_m', 'distance_m',      // where somebody physically was
   'exit_reason', 'password_hash', 'token_hash',              // RESTRICTED / credentials
-  'net_minor', 'gross_minor', 'amount_minor', 'declared_net_minor', 'component_code',
 ];
+
+/*
+ * MONEY: BANNED OUTSIDE THE `pay` DOMAIN, NOT BANNED OUTRIGHT (ADR-0021).
+ *
+ * These five were in the list above until ADR-0021, because ADR-0020 section 6 said "the
+ * catalogue contains no payslip entity" - so a money column ANYWHERE was proof of a breach. The
+ * product owner then asked for the opposite: "everybody should have the option to see their
+ * salary. and hr have option to see everyibnes salary". A figure in a PAY tool is now the
+ * feature working.
+ *
+ * THE CHECK IS NARROWED, NOT DELETED, and the narrowed form still catches what would really be
+ * a defect: a leave, attendance, work or onboarding-PROCESS tool growing a money column.
+ * `tools-onboarding.ts` promises in four descriptions that it returns no figures, and this is
+ * what holds it to that - the amounts live in `onboarding_annexure_amounts`, which sits in the
+ * `pay` domain precisely so this line can be drawn.
+ */
+const BANNED_OUTSIDE_PAY = [
+  'net_minor', 'gross_minor', 'amount_minor', 'declared_net_minor', 'component_code',
+  'deductions_minor', 'declared_annual_ctc_minor', 'ctc_at_decision_minor',
+];
+
+/*
+ * MONEY IS A DECLARED PROPERTY OF THE TOOL, NOT ITS ROUTING DOMAIN (ADR-0021 s2).
+ *
+ * This keyed off `domain === 'pay'` for one revision, and that was wrong the moment
+ * `onboarding_annexure_amounts` had to move to `cross` to be reachable by the router: a
+ * guarantee about where a figure may travel must not depend on which blurb the router matched.
+ * `/assistant/capabilities` publishes `money`, so the set below follows the tools.
+ */
+const MONEY_TOOLS = new Set(CATALOGUE.filter((t) => t.money === true).map((t) => t.name));
+check('the catalogue declares which tools carry money', MONEY_TOOLS.size > 0,
+  'without this the money checks below are vacuous for every tool');
+// Kept under the old name so the two call sites below read unchanged.
+const PAY_TOOLS = MONEY_TOOLS;
 
 for (const [label, email] of Object.entries(ACCOUNTS)) {
   await login(email);
   const seen = new Set();
+  const seenOutsidePay = new Set();
   for (const t of CATALOGUE) {
     const r = await run(t.name);
-    for (const row of r.body?.rows ?? []) for (const k of Object.keys(row)) seen.add(k);
+    for (const row of r.body?.rows ?? []) {
+      for (const k of Object.keys(row)) {
+        seen.add(k);
+        if (!PAY_TOOLS.has(t.name)) seenOutsidePay.add(k);
+      }
+    }
   }
   const bad = BANNED.filter((c) => seen.has(c));
   check(`[${label}] no banned column appears anywhere in the catalogue`, bad.length === 0,
     `found ${bad.join(',')}`);
+
+  const money = BANNED_OUTSIDE_PAY.filter((c) => seenOutsidePay.has(c));
+  check(`[${label}] no money column appears OUTSIDE the pay domain`, money.length === 0,
+    `found ${money.join(',')} in a non-pay tool - ADR-0021 permits figures in pay tools only`);
 }
 
 // The author reads back their own leave reason; nobody else does.
@@ -366,22 +457,64 @@ const FORBIDDEN = [
   'who is my least productive report?',
   'who is underperforming on my team?',
   'should I fire EMP001?',
-  'what does Priya earn?',
-  'show me everyone\'s salary',
-  'how much does EMP001 make?',
   'give me a productivity score for each of my reports',
   'who earns the most in the company?',
   'what is the appraisal rating for EMP003?',
-  // DEC-142 narrowed the pay patterns. These must still be refused as a fixed limit.
+
+  /*
+   * PAY AS A COMPARISON, A RANKING OR AN AGGREGATE. ADR-0021 section 3 keeps these forbidden and
+   * says why they are different in kind from a lookup: **each is refused for hr_admin too.**
+   * That is the test. HR may read every payslip in the company one at a time and still may not
+   * ask the assistant who is paid the most, because a comparison across people is a judgement
+   * about them and the catalogue contains no tool that can express one.
+   */
+  'who earns the most in the company?',
+  'who is the highest paid employee?',
+  'rank the team by salary',
+  'compare my salary with Priya',
+  'what is the average salary here?',
+  'what is the total payroll cost?',
+  'who earns more than me?',
+  'show me the salary bands',
+  'should I give Priya a raise?',
+  'recommend a salary for the new joiner',
+  'what should EMP001 be paid?',
+];
+
+/*
+ * PAY LOOKUPS THAT MOVED OUT OF THE LIST ABOVE, BY ADR-0021.
+ *
+ * Every one of these was asserted as `forbidden_purpose` until the product owner asked for the
+ * opposite: *"everybody should have the option to see their salary. and hr have option to see
+ * everyibnes salary."* They are now decided by `payroll.payslip.read` and
+ * `onboarding.annexure.read` instead of by a regex - which is the only way they CAN be decided,
+ * because the right answer differs by role for the same string:
+ *
+ *   "what is the salary of EMP006"   ANSWERED for hr_admin and finance
+ *                                    REFUSED  for an employee or a line manager
+ *
+ * WHAT THIS SECTION CAN AND CANNOT PROVE. It asserts only that the permanent compensation
+ * refusal is no longer given - the outcome INSTEAD depends on whether a key is configured
+ * (`no_tool`/an answer with one, `disabled` without), exactly as DEC-142's own
+ * MUST_NOT_BE_FORBIDDEN list notes. That the authorization layer then refuses an employee asking
+ * about a colleague is proven model-free in section 2 and in `assistant:pay`, where it belongs.
+ */
+const PAY_NOW_ALLOWED_THROUGH = [
   'what is my salary?',
   'tell me my salary',
   'show me my salary structure',
-  'what is my ctc?',
-  'how much is my bonus this year',
-  'what is the salary of EMP006',
-  'my net salary please',
-  'what was my increment last year',
+  'what is my net pay?',
+  'how much was I paid in August?',
   'show my payslip',
+  'can I download my payslip?',
+  'what is my ctc?',
+  'what is the salary of EMP006',
+  'what does Priya earn?',
+  'how much does EMP001 make?',
+  "show me everyone's salary",
+  'salary of onboarded candidate',
+  'what is the CTC in the annexure for EMP007?',
+  'what are the salary components for the new joiner?',
 ];
 
 /*
@@ -415,6 +548,13 @@ for (const q of MUST_NOT_BE_FORBIDDEN) {
   const r = await ask(q);
   check(`not a forbidden purpose: "${q}"`, r.refusal?.code !== 'forbidden_purpose',
     'a pay-SCHEDULE or ordinary question must not get the compensation refusal');
+}
+
+// ADR-0021: a pay LOOKUP reaches the catalogue, and authorization decides it from there.
+for (const q of PAY_NOW_ALLOWED_THROUGH) {
+  const r = await ask(q);
+  check(`pay lookup is not a forbidden purpose: "${q}"`, r.refusal?.code !== 'forbidden_purpose',
+    'ADR-0021 moved pay lookups to the authorization layer - a regex must no longer refuse them');
 }
 
 // The refusal must be legible as permanent, not as a permissions problem somebody could fix.
@@ -935,13 +1075,40 @@ for (const [label, email] of Object.entries(ACCOUNTS)) {
     const r = await run(t.name);
     const p = r.body?.modelPayload;
     if (r.body?.refusal) continue;              // a refusal sends nothing anywhere
-    payloadCells++;
 
+    /*
+     * A PAY TOOL MUST HAVE NO PAYLOAD AT ALL, and this is the STRONGER assertion of the two -
+     * ADR-0021 section 2's whole guarantee, checked rather than described.
+     *
+     * The condition on which the assistant was allowed to report pay is that no figure is sent
+     * to a model provider: a pay tool composes its own sentence and the controller returns
+     * before `buildAnswerPayload` is ever called. So for these tools the right check is not
+     * "the payload carries nothing banned" but "there is no payload", which cannot be satisfied
+     * by a payload that merely happens to look clean today.
+     *
+     * `sentence` is required alongside it, because a tool with neither payload nor sentence
+     * would pass the first half by having no answer at all.
+     */
+    if (PAY_TOOLS.has(t.name)) {
+      payloadCells++;
+      check(`[${label}] ${t.name} builds NO answer payload (ADR-0021 s2)`, p === null,
+        'a pay figure must never be sent to the provider, and a built payload is how it would be');
+      check(`[${label}] ${t.name} answers with its own sentence instead`,
+        typeof r.body?.sentence === 'string' && r.body.sentence.length > 0,
+        'no payload AND no sentence means the turn has no answer');
+      continue;
+    }
+
+    payloadCells++;
     if (!check(`[${label}] ${t.name} publishes the payload it would send`, !!p?.user,
       'without it this section proves nothing')) continue;
 
     const family = familyOf(t.resource);
-    const allowed = family === 'none' ? new Set() : REACH[label][family];
+    // 'organisation' is a property of the RESOURCE, so it is the same set for every role -
+    // unlike the other three, which are looked up per caller.
+    const allowed = family === 'none' ? new Set()
+      : family === 'organisation' ? ORGANISATION
+        : REACH[label][family];
     const leaked = [...namesIn(p.user)].filter((n) => !allowed.has(n));
     check(`[${label}] ${t.name} payload names nobody out of reach (${family} scope)`,
       leaked.length === 0,
