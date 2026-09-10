@@ -106,6 +106,8 @@ export const ALL_RESOURCE_TYPES = [
   'org_config',
   'audit_event',
   'identity',
+  // Onboarding (ADR-0020): the offer/annexure record, before an `employee` row exists.
+  'salary_annexure',
 ] as const;
 
 export type ResourceType = (typeof ALL_RESOURCE_TYPES)[number];
