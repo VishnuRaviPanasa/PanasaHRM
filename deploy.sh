@@ -68,6 +68,41 @@ if [ -n "$missing" ]; then
   exit 1
 fi
 
+# The AI assistant (ADR-0020) is off unless prod.env turns it on. When it IS on, the key file has
+# to exist and be readable BEFORE compose starts, because both ways of getting that wrong fail
+# silently at the wrong layer: Docker creates a DIRECTORY at a missing bind source, and a
+# root-owned 0400 file is unreadable by the container's `node` user (uid 1000). Either way the API
+# comes up healthy and refuses every question, which reads like a code problem and is not.
+assistant_on="$(grep -E '^HRM_ASSISTANT_ENABLED=' "$ENV_FILE" | tail -n1 | cut -d= -f2- || true)"
+if [ "$assistant_on" = "true" ]; then
+  keypath="$(grep -E '^HRM_LLM_KEY_HOST_PATH=' "$ENV_FILE" | tail -n1 | cut -d= -f2- || true)"
+  # Compose strips surrounding quotes from an env-file value, so this has to as well - otherwise a
+  # perfectly good quoted path is reported as a file that does not exist.
+  keypath="${keypath%\"}"; keypath="${keypath#\"}"
+  keypath="${keypath%\'}"; keypath="${keypath#\'}"
+  if [ -z "$keypath" ]; then
+    echo "HRM_ASSISTANT_ENABLED=true but HRM_LLM_KEY_HOST_PATH is empty in $ENV_FILE." >&2
+    echo "  The provider key is file-backed; there is no plain-variable path in this stack." >&2
+    exit 1
+  fi
+  if [ ! -f "$keypath" ]; then
+    echo "HRM_LLM_KEY_HOST_PATH does not name an existing file: $keypath" >&2
+    echo "  Create it FIRST - Docker would otherwise bind-mount a new directory:" >&2
+    echo "    sudo install -o 1000 -g 1000 -m 0400 /dev/null '$keypath'" >&2
+    echo "    sudo sh -c 'printf %s \"sk-...\" > $keypath'" >&2
+    exit 1
+  fi
+  if [ ! -s "$keypath" ]; then
+    echo "HRM_LLM_KEY_HOST_PATH names an EMPTY file: $keypath" >&2
+    echo "  An empty key file is the same as no key - the assistant would refuse every" >&2
+    echo "  question while reporting itself enabled." >&2
+    exit 1
+  fi
+  echo "NOTE: the AI assistant is ENABLED in $ENV_FILE."
+  echo "      ADR-0020's release gate is a 100% assistant:redteam score with no waiver, and the"
+  echo "      answer is written from result rows, which sends them to the provider (DEC-140)."
+fi
+
 # Read the published port back out of the env file so the health check below cannot drift from
 # what compose actually publishes.
 PORT="$(grep -E '^HRM_PUBLISH_PORT=' "$ENV_FILE" | tail -n1 | cut -d= -f2- || true)"

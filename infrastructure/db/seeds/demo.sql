@@ -74,6 +74,16 @@ DELETE FROM user_role;
 ALTER TABLE user_role ENABLE ALWAYS TRIGGER tg_user_role_immutable_history;
 
 DELETE FROM session;
+-- Assistant transcripts reference app_user and employee (migration 0029), so they go before
+-- both. The rail here refuses DELETE inside the 90-day retention window rather than refusing
+-- DELETE outright (DEC-130 - a chat log kept forever is the harm), and a demo transcript is
+-- always inside it, so the owner disables it explicitly for a destructive re-seed. Same pattern
+-- as the ledger, the lifecycle log and the timesheet transitions above.
+ALTER TABLE assistant_message DISABLE TRIGGER trg_assistant_message_immutable;
+DELETE FROM assistant_message;
+ALTER TABLE assistant_message ENABLE ALWAYS TRIGGER trg_assistant_message_immutable;
+DELETE FROM assistant_conversation;
+
 DELETE FROM app_user;
 
 -- leave_ledger and leave_account are append-only, and their rails are ENABLE ALWAYS, so
@@ -329,6 +339,34 @@ INSERT INTO user_role (user_id, role, valid_from, reason)
 SELECT u.id, 'employee', e.joined_on, 'seeded: every account is also an employee'
   FROM app_user u JOIN employee e ON e.id = u.employee_id
  WHERE u.role <> 'employee';
+
+/*
+ * FINANCE and AUDITOR, so all four distinct scope shapes exist in the demo data.
+ *
+ * `app_user.role` is the superseded single column and only admits employee/manager/hr_admin, so
+ * these two roles were unreachable in a running system: `authz-matrix.yaml` has 52 actions x 6
+ * roles and only three of those roles could ever log in. Every deny cell for finance and auditor
+ * was therefore proven against the policy in isolation and never once against the API.
+ *
+ * They matter more than their obscurity suggests. `finance` is the ONLY non-HR role that reads
+ * pay, and `auditor` reads the audit trail but deliberately not the data it describes - so they
+ * are precisely the two roles whose intuition ("privileged, therefore broad") is wrong, and the
+ * ones an assistant is most likely to over-serve. ADR-0020's red-team needs to be able to log in
+ * as them.
+ *
+ * Additive, on people who already have an account: that is how a real organisation works, and it
+ * also exercises the harder case - somebody holding `employee` AND a privileged role, where the
+ * question is whether the second widens what the first sees.
+ */
+INSERT INTO user_role (user_id, role, valid_from, reason)
+SELECT u.id, 'finance', e.joined_on, 'seeded: a finance holder, for the authorization suites'
+  FROM app_user u JOIN employee e ON e.id = u.employee_id
+ WHERE u.email = 'anu.krishnan@panasatech.com';
+
+INSERT INTO user_role (user_id, role, valid_from, reason)
+SELECT u.id, 'auditor', e.joined_on, 'seeded: an auditor, for the authorization suites'
+  FROM app_user u JOIN employee e ON e.id = u.employee_id
+ WHERE u.email = 'rahul.nair@panasatech.com';
 
 RESET hrm.allow_backdated_period;
 

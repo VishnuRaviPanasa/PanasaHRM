@@ -262,6 +262,54 @@ services:
       HRM_MINIO_ACCESS_KEY: ${HRM_MINIO_ACCESS_KEY}
       HRM_MINIO_SECRET_KEY: ${HRM_MINIO_SECRET_KEY}
       HRM_DOC_BUCKET: ${HRM_DOC_BUCKET:-hrm-documents}
+      # --- THE AI ASSISTANT (ADR-0020) ------------------------------------------------------
+      #
+      # OFF as shipped, and off even when switched on until a readable key file is mounted below.
+      # ADR-0020 deferred *how* the key reaches a production container to the deployment; this is
+      # that decision made (DEC-164), not a change of posture.
+      #
+      # HAVING SOMEWHERE TO PUT THE KEY IS NOT CLEARANCE TO SWITCH IT ON. ADR-0020's release gate
+      # is a 100% `assistant:redteam` score with no waiver.
+      #
+      # A BLANK value is treated as ABSENT by the API (apps/api/src/assistant/llm.ts), which is
+      # what makes the `:-` defaults here safe: an operator who sets none of the optional
+      # variables gets the code's defaults, not a model named "" or a zero-millisecond timeout.
+      HRM_ASSISTANT_ENABLED: ${HRM_ASSISTANT_ENABLED:-false}
+      # FIXED, and deliberately not a prod.env variable: this is the container-side half of the
+      # bind mount below, and a second knob could only ever disagree with the first. Another
+      # secret mechanism - a swarm secret, a secrets agent - mounts its file at this same path.
+      HRM_LLM_API_KEY_FILE: /run/secrets/hrm_llm_api_key
+      # NOT DECLARED, on purpose: HRM_LLM_API_KEY. The plain variable holds the key in the
+      # environment, where `docker inspect` and /proc/<pid>/environ can read it, and
+      # security-guidelines.md ("Secrets") bars that for a deployment. It exists for local
+      # development only (DEC-129). Undeclared here means it cannot be passed by accident.
+      HRM_LLM_MODEL: ${HRM_LLM_MODEL:-}
+      HRM_LLM_BASE_URL: ${HRM_LLM_BASE_URL:-}
+      HRM_LLM_TIMEOUT_MS: ${HRM_LLM_TIMEOUT_MS:-}
+      # THE ONE SWITCH THAT DECIDES WHETHER PERSONAL DATA CROSSES THE BORDER. Default (true) sends
+      # the masked result rows the asker is already being shown, so the answer can state a figure
+      # (DEC-140, amending ADR-0020 s3). `false` sends column names and a row count only.
+      HRM_LLM_ANSWER_FROM_ROWS: ${HRM_LLM_ANSWER_FROM_ROWS:-}
+      HRM_LLM_STREAM: ${HRM_LLM_STREAM:-}
+    volumes:
+      # THE PROVIDER KEY, file-backed. `HRM_LLM_KEY_HOST_PATH` is a path ON THE VM; it arrives
+      # read-only at the fixed path the API is told to read. Never a build arg - build args
+      # persist in image layers.
+      #
+      # IT DEFAULTS TO /dev/null, which reads as an EMPTY file: with the assistant off - the
+      # shipped state - there is no key, `Llm.enabled` stays false, and the mount is inert. A bind
+      # mount cannot be made conditional in compose and an empty source is a syntax error, so a
+      # harmless always-present source is the way to keep this one variable rather than two.
+      #
+      # THE FILE MUST EXIST BEFORE THE FIRST `up`. Docker creates a DIRECTORY at a bind source
+      # that is missing, and the API then reports the path unreadable and refuses every question -
+      # a failure that reads like a code problem and is not. `deploy.sh` checks for it first.
+      #
+      # OWNERSHIP MATTERS: the API container runs as `node`, uid 1000 (api.Dockerfile), so a 0400
+      # file owned by root on the host is unreadable inside it. Create it as:
+      #     sudo install -o 1000 -g 1000 -m 0400 /dev/null /etc/panasa-hrm/llm-api-key
+      #     sudo sh -c 'printf %s "sk-..." > /etc/panasa-hrm/llm-api-key'
+      - ${HRM_LLM_KEY_HOST_PATH:-/dev/null}:/run/secrets/hrm_llm_api_key:ro
     depends_on:
       postgres:
         condition: service_healthy

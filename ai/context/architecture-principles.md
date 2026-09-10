@@ -13,7 +13,7 @@ expensive layer, and the only one that can be wrong while sounding right.
 
 ## Modules
 
-Ten bounded contexts, each owning its own tables:
+Eleven bounded contexts, each owning its own tables:
 
 ```
 identity      auth, sessions, users, roles, permissions
@@ -26,11 +26,19 @@ work          projects, tasks, work logs, timesheets, summaries
 attendance    punches, shifts, rosters, daily derivation, regularization
 notifications templates, dispatch, in-app inbox, preferences
 audit         append-only trail, retention, query surface
+assistant     the in-product AI assistant: tool catalogue, transcripts (ADR-0020)
 ```
 
 **Dependency rule:** `identity` and `audit` are depended on by all. `organization` <- `people` <-
 {`leave`, `work`, `attendance`, `documents`}. `workflow` is depended on by `leave`, `work` and
 `attendance` but **knows nothing about them**. No cycles.
+
+`assistant` is a **leaf**: it reads from the others and **nothing depends on it**, so deleting it
+would break no module. That is deliberate and is what keeps it removable. It reads under the
+named exception in ADR-0020 §5 - read-only, one direction, through the same authz action and the
+same `scope()` predicate the owning module uses, never persisted. It is the eleventh context
+because ADR-0014 required that "AI code is never inline in a domain module"; ADR-0014 reserved
+the name `ai`, and ADR-0020 records why it is `assistant` instead.
 
 `work` and `attendance` are **siblings, not parent and child** (ADR-0015).
 

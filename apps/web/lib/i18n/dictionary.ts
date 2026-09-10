@@ -652,6 +652,22 @@ const en = {
   'ep.recordingFor': 'Recording for {name}',
   'ep.noWorkLogYet': 'Record effort for this employee',
   'ep.workLogEmptyHint': 'Use Add work log when an employee could not enter their own effort. The entry is attributed to you.',
+  // The assistant (ADR-0020).
+  'chat.open': 'Open the assistant',
+  'chat.close': 'Close the assistant',
+  'chat.title': 'HR assistant',
+  'chat.subtitle': 'Answers from your own HR records',
+  'chat.clear': 'Clear',
+  'chat.emptyTitle': 'What would you like to know?',
+  'chat.emptyHint': 'Ask about leave, attendance, or your own employment record. Every answer is limited to what you already have access to.',
+  'chat.eg1': 'How much casual leave do I have left?',
+  'chat.eg2': 'How many days was I late this month?',
+  'chat.thinking': 'Looking that up…',
+  'chat.noRows': 'Nothing matched that.',
+  'chat.error': 'Something went wrong. Nothing was changed.',
+  'chat.send': 'Ask',
+  'chat.placeholder': 'Ask a question…',
+  'chat.inputLabel': 'Your question',
 } as const;
 
 export type Dictionary = Record<keyof typeof en, string>;
@@ -1258,6 +1274,22 @@ const ar: Dictionary = {
   'ep.recordingFor': 'التسجيل لصالح {name}',
   'ep.noWorkLogYet': 'تسجيل جهد لهذا الموظف',
   'ep.workLogEmptyHint': 'استخدم إضافة سجل عمل عندما لا يستطيع الموظف إدخال جهده بنفسه. يُنسب السجل إليك.',
+  // The assistant (ADR-0020).
+  'chat.open': 'فتح المساعد',
+  'chat.close': 'إغلاق المساعد',
+  'chat.title': 'مساعد الموارد البشرية',
+  'chat.subtitle': 'إجابات من سجلاتك في الموارد البشرية',
+  'chat.clear': 'مسح',
+  'chat.emptyTitle': 'ما الذي تود معرفته؟',
+  'chat.emptyHint': 'اسأل عن الإجازات أو الحضور أو سجل توظيفك. تقتصر كل إجابة على ما لديك صلاحية الاطلاع عليه بالفعل.',
+  'chat.eg1': 'كم يتبقى لي من الإجازات العارضة؟',
+  'chat.eg2': 'كم يوماً تأخرت هذا الشهر؟',
+  'chat.thinking': 'جارٍ البحث عن ذلك…',
+  'chat.noRows': 'لا توجد نتائج مطابقة.',
+  'chat.error': 'حدث خطأ ما. لم يتم تغيير أي شيء.',
+  'chat.send': 'اسأل',
+  'chat.placeholder': 'اطرح سؤالاً…',
+  'chat.inputLabel': 'سؤالك',
 };
 
 export const DICTIONARIES: Record<Locale, Dictionary> = { en, ar };

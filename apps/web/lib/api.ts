@@ -141,11 +141,82 @@ async function blob(path: string): Promise<{ url: string; contentType: string; r
   };
 }
 
+/**
+ * Server-Sent Events over POST. The FIRST streaming path in this codebase.
+ *
+ * It cannot go through `request()`, which does `await res.text()` and so waits for the whole
+ * body - the one thing a stream must not do. It is a sibling of `upload`/`download`/`blob` for
+ * the same reason those are: each has a body-handling rule that `request()` cannot express.
+ *
+ * `EventSource` is not used, deliberately: it is GET-only, and the question has to travel in a
+ * body rather than a query string. A question is PERSONAL data (data-inventory.md) and a query
+ * string reaches the access log, the browser history and any proxy in between.
+ *
+ * `onEvent` is called per event as it arrives. The returned promise settles when the stream ends;
+ * `signal` aborts it.
+ */
+export async function stream(
+  path: string,
+  body: unknown,
+  onEvent: (event: string, data: unknown) => void,
+  signal?: AbortSignal,
+): Promise<void> {
+  let res: Response;
+  try {
+    res = await fetch(apiUrl(path), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Accept: 'text/event-stream' },
+      body: JSON.stringify(body ?? {}),
+      ...(signal ? { signal } : {}),
+    });
+  } catch {
+    throw new ApiError(0, 'Cannot reach the server. Is the API running on port 4000?');
+  }
+
+  if (!res.ok) {
+    // An error before the stream starts is an ordinary JSON response.
+    const text = await res.text();
+    let parsed: any = null;
+    try { parsed = text ? JSON.parse(text) : null; } catch { parsed = text; }
+    throw new ApiError(res.status,
+      typeof parsed?.message === 'string' ? parsed.message : `Request failed (${res.status})`);
+  }
+  if (!res.body) throw new ApiError(0, 'The server sent no response body.');
+
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = '';
+
+  // Events are separated by a blank line. A chunk can split one anywhere, including mid-UTF-8,
+  // so `stream: true` on the decoder and a carry-over buffer are both load-bearing.
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+
+    let sep: number;
+    while ((sep = buffer.indexOf('\n\n')) !== -1) {
+      const block = buffer.slice(0, sep);
+      buffer = buffer.slice(sep + 2);
+
+      let name = 'message';
+      const dataLines: string[] = [];
+      for (const line of block.split('\n')) {
+        if (line.startsWith('event: ')) name = line.slice(7).trim();
+        else if (line.startsWith('data: ')) dataLines.push(line.slice(6));
+      }
+      if (dataLines.length === 0) continue;
+      try { onEvent(name, JSON.parse(dataLines.join('\n'))); } catch { /* ignore a partial frame */ }
+    }
+  }
+}
+
 export const api = {
   get: <T>(path: string) => request<T>(path),
   upload,
   download,
   blob,
+  stream,
   post: <T>(path: string, body?: unknown) =>
     request<T>(path, { method: 'POST', body: JSON.stringify(body ?? {}) }),
   patch: <T>(path: string, body?: unknown) =>

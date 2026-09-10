@@ -1,15 +1,19 @@
 # Architecture Decision Records
 
-19 ADRs, **all currently `Proposed`**. Only a human may set one to Accepted; no agent may.
+20 ADRs. **19 are `Proposed`; ADR-0014 is `Superseded by ADR-0020`.** None has been Accepted.
+Only a human may set one to Accepted; no agent may.
 Once Accepted a file is immutable and `.claude/hooks/guard-adr.mjs` refuses edits - supersede it
 with a new ADR instead.
 
-Two ADRs carry a condition a reader must not miss:
+Three ADRs carry a condition a reader must not miss:
 
 - **ADR-0012 (payroll) is BLOCKED** pending plan question Q10, build-vs-buy. If payroll is bought,
   it should be retired rather than amended (DEC-026, OR-09).
 - **ADR-0006 (leave balance) carries an acceptance precondition**: the anti-overdraw mechanism must
   be implemented and concurrency-tested first.
+- **ADR-0014 is superseded but NOT void.** Two clauses outlive it and bind ADR-0020: the list of
+  uses forbidden "regardless of any later decision", and the rule that this development harness is
+  never pointed at a production database. Read its status blockquote before assuming it is spent.
 
 Every ADR was amended on 2026-09-08 following two adversarial verification passes. The findings and
 what remains open are in `adr-review-report.md` and `adr-review-report-pass2.md`.
@@ -29,12 +33,13 @@ what remains open are in `adr-review-report.md` and `adr-review-report-pass2.md`
 | [0011](0011-attendance-storage.md) | Immutable punches, derived days, partitioned | Retroactive recompute must never touch paid periods |
 | [0012](0012-payroll-statutory-rules.md) | Versioned statutory rules engine | India's Labour Codes are mid-transition |
 | [0013](0013-deployment.md) | Docker Compose on one VM | Sustainable beats sophisticated for a solo operator |
-| [0014](0014-no-runtime-ai.md) | No runtime AI in v1 | No API key; seams built anyway at near-zero cost |
+| ~~[0014](0014-no-runtime-ai.md)~~ | ~~No runtime AI in v1~~ **Superseded by 0020** | Its forbidden-uses list and its harness/production bound both SURVIVE the supersession |
 | [0015](0015-work-logs-vs-attendance.md) | Siblings that reconcile, never derive | Deriving paid days from a timesheet makes payroll indefensible |
 | [0016](0016-effort-granularity-and-cost.md) | Integer minutes; no cost on the effort row | Storing cost leaks salary to project managers by arithmetic |
 | [0017](0017-work-log-privacy-posture.md) | Purpose-bound, not a productivity signal | An honest log is only possible when it is not graded |
 | [0018](0018-standalone-application.md) | No dependency on any existing system | Zero coupling, at the price of some duplicate data entry |
 | [0019](0019-configuration-model.md) | Effective-dated policy vs mutable settings | A mutable settings row would silently rewrite history on every recompute |
+| [0020](0020-runtime-ai-assistant.md) | Runtime AI as tool calling, not text-to-SQL | The assistant defines no new authz action, so it cannot out-reach the screens beside it |
 
 ## Accepting an ADR
 
