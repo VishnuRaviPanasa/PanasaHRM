@@ -1,6 +1,6 @@
 # Architecture Decision Records
 
-20 ADRs. **19 are `Proposed`; ADR-0014 is `Superseded by ADR-0020`.** None has been Accepted.
+21 ADRs. **20 are `Proposed`; ADR-0014 is `Superseded by ADR-0020`.** None has been Accepted.
 Only a human may set one to Accepted; no agent may.
 Once Accepted a file is immutable and `.claude/hooks/guard-adr.mjs` refuses edits - supersede it
 with a new ADR instead.
@@ -40,6 +40,7 @@ what remains open are in `adr-review-report.md` and `adr-review-report-pass2.md`
 | [0018](0018-standalone-application.md) | No dependency on any existing system | Zero coupling, at the price of some duplicate data entry |
 | [0019](0019-configuration-model.md) | Effective-dated policy vs mutable settings | A mutable settings row would silently rewrite history on every recompute |
 | [0020](0020-runtime-ai-assistant.md) | Runtime AI as tool calling, not text-to-SQL | The assistant defines no new authz action, so it cannot out-reach the screens beside it |
+| [0021](0021-onboarding-boundary.md) | The onboarding boundary is `offer_accepted` | Hiremate owns the candidate; this system owns the employee. Drafted as 0020, renumbered when the chatbot branch merged claiming the same number |
 
 ## Accepting an ADR
 

@@ -56,8 +56,20 @@ const deny = (reason) => {
   process.exit(0);
 };
 
+/**
+ * An ADR is a NUMBERED decision record. Everything else living in docs/adr/ is not.
+ *
+ * This used to match any `.md` under docs/adr/, which swept in `README.md` (the index) and the
+ * three `adr-review-report*.md` files. None of those has a `## Status` section, the parser
+ * therefore returns UNKNOWN, and UNKNOWN fails closed - so the ADR INDEX became permanently
+ * unmodifiable from inside the harness, while remaining freely editable to anyone working
+ * outside it (hooks only run in Claude Code). It also denied read-only commands that merely
+ * named such a path alongside an in-place-looking token.
+ *
+ * The `\d{4}-` prefix is the same test `adrFileNames()` already applied, so the two agree now.
+ */
 const isAdrPath = (p) =>
-  /(^|\/)docs\/adr\/[^/]+\.md$/.test(p) && !/0000-template\.md$/.test(p);
+  /(^|\/)docs\/adr\/\d{4}-[^/]*\.md$/.test(p) && !/0000-template\.md$/.test(p);
 
 /** Filenames that are actually ADRs, for basename matching. */
 const adrFileNames = () => {
@@ -138,8 +150,14 @@ const INPLACE_TOOL = new RegExp([
   /\b(mv|cp|rm|rsync|ln)\b/.source,
   /\bgit\s+(checkout|restore|apply|stash|clean|mv|rm)\b/.source,
   /\b(python[0-9.]*|node|ruby|php|pwsh|powershell)\b[^;|]*\s-(c|e|Command)\b/.source,
-  /\bxargs\b/.source,
-  /\bfind\b[^;|]*-(exec|delete)\b/.source,
+  // `find ... -delete` genuinely removes files and nothing else here matches it.
+  //
+  // Bare `xargs` and `find -exec` were removed: neither writes anything by itself, so they
+  // added no coverage - a pipeline that actually writes names the writing tool too
+  // (`... | xargs sed -i`, `find -exec rm`), and both of those already match above. What they
+  // DID do was deny read-only commands: `grep -c x docs/adr/README.md | xargs -I{} echo {}`
+  // was refused, which teaches people to route around the guard rather than trust it.
+  /\bfind\b[^;|]*\s-delete\b/.source,
 ].join('|'), 'i');
 
 const globToRe = (g) =>

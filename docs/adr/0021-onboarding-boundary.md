@@ -1,4 +1,4 @@
-# ADR-0020: The Onboarding Boundary — Where Hiremate Ends and This System Begins
+# ADR-0021: The Onboarding Boundary — Where Hiremate Ends and This System Begins
 
 ## Status
 
@@ -6,6 +6,17 @@ Proposed
 
 > Only a human may set this to Accepted. Once Accepted this file is immutable and
 > `.claude/hooks/guard-adr.mjs` will refuse edits - supersede it with a new ADR instead.
+
+> **Renumbered from 0020 to 0021 on 2026-09-10.** This ADR was drafted as 0020 on 2026-09-09
+> (commit 3b2dfc9). The `feature/chatbot` branch was drafted against an earlier base and also
+> claimed 0020, and when it merged there were two ADR-0020s - which made ADR-0014's
+> `Superseded by ADR-0020` ambiguous.
+>
+> This file moved rather than the other one because the numbering has to stay consistent with
+> what already points at it: the runtime-AI ADR is referenced by ADR-0014's supersession line,
+> the ADR index, migration 0035, `packages/authz/src/field-registry.ts`, the assistant code and
+> the red-team suite. This ADR was referenced by nothing but the session handoff. Moving the
+> less-referenced file was the change that broke nothing.
 
 ## Date
 

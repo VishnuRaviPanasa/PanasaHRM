@@ -673,6 +673,70 @@ console.log('\n=== guard-commit: reviewed exceptions are pinned to content ===')
     `computed ${sha.slice(0, 16)}... - if this fails the pin and schema_migration disagree`);
 }
 
+// ---------------------------------------------------------------------------
+// docs/adr/ holds more than ADRs: the index and the review reports. None has a `## Status`
+// section, so the parser returns UNKNOWN and the guard fails CLOSED - which made the ADR index
+// permanently unmodifiable from inside the harness while staying freely editable outside it.
+//
+// The other half is over-reach in the Bash branch: bare `xargs` and `find -exec` counted as
+// in-place tools, so read-only pipelines were denied.
+//
+// These cases pin BOTH halves of the change. T100-T103 assert the relaxation and FAIL against
+// the un-fixed hook. T104-T107 assert that it took nothing away, and pass against BOTH hooks -
+// that is their purpose: they are the cases that would fail if the deny paths were ever widened
+// out along with the false positives. Verified by running this suite against HEAD's hook.
+// ---------------------------------------------------------------------------
+console.log('\n=== guard-adr: docs/adr is not all ADRs, and reads are not writes ===');
+
+// Own the fixtures. Two earlier sections rmSync the whole docs/adr tree (lines ~231, ~382), so
+// the first draft of this section inherited an EMPTY directory: `0001-accepted.md` did not
+// exist, statusOfFile() returned null, and the guard allowed - so the read-only case passed
+// against the un-fixed hook too, and the "still blocked" case failed against the fixed one.
+// Both were fixture bugs, and both were invisible until the mutation run. Do not rely on a
+// fixture written 500 lines up.
+rmSync('docs/adr', { recursive: true, force: true });
+mkdirSync('docs/adr', { recursive: true });
+writeFileSync('docs/adr/0001-accepted.md',
+  '# ADR-0001: Test\n\n## Status\n\nAccepted\n\n## Context\n\nx\n');
+
+writeFileSync('docs/adr/README.md',
+  '# Architecture Decision Records\n\n21 ADRs. One is Accepted.\n\n| ADR | Decision |\n');
+r = runHook('guard-adr.mjs', editPayload('docs/adr/README.md'));
+check('T100 the ADR index is editable (it is not an ADR)', r.decision, 'allow', r.reason);
+
+writeFileSync('docs/adr/adr-review-report.md', '# Review\n\nADR-0001 verdict: ACCEPT\n');
+r = runHook('guard-adr.mjs', editPayload('docs/adr/adr-review-report.md'));
+check('T101 a review report is editable', r.decision, 'allow', r.reason);
+
+r = runHook('guard-adr.mjs', bashPayload("sed -i 's/21/22/' docs/adr/README.md"));
+check('T102 rewriting the index from a shell is allowed', r.decision, 'allow', r.reason);
+
+// A read-only pipeline that merely mentions an Accepted ADR. Denied before this change.
+r = runHook('guard-adr.mjs', bashPayload(
+  'grep -c Status docs/adr/0001-accepted.md | xargs -I{} echo {}'));
+check('T103 a read-only xargs pipeline naming an Accepted ADR is allowed',
+  r.decision, 'allow', r.reason);
+
+// ...and the writing forms still lose. The pipeline names the tool that writes, which is what
+// the guard matches on - so dropping bare `xargs` cost no coverage.
+r = runHook('guard-adr.mjs', bashPayload(
+  "printf '%s' docs/adr/0001-accepted.md | xargs sed -i 's/Accepted/Proposed/'"));
+check('T104 xargs INTO sed -i on an Accepted ADR is still blocked', r.decision, 'deny', r.reason);
+
+r = runHook('guard-adr.mjs', bashPayload(
+  'find docs/adr -name "0001-*.md" -exec rm {} \\;'));
+check('T105 find -exec rm on an Accepted ADR is still blocked', r.decision, 'deny', r.reason);
+
+r = runHook('guard-adr.mjs', bashPayload('find docs/adr -name "*.md" -delete'));
+check('T106 find -delete over docs/adr is still blocked', r.decision, 'deny', r.reason);
+
+// The guard must still refuse a NUMBERED ADR that has no parseable status - fail-closed is the
+// behaviour that stopped the 2026-09-08 bypass, and narrowing the path test must not weaken it.
+writeFileSync('docs/adr/0044-no-status.md', '# ADR-0044\n\nSome prose and no Status section.\n');
+r = runHook('guard-adr.mjs', editPayload('docs/adr/0044-no-status.md'));
+check('T107 a numbered ADR with an unparseable status still fails CLOSED',
+  r.decision, 'deny', r.reason);
+
 console.log('\n=== guard-commit: this suite must be committable ===');
 reset();
 {

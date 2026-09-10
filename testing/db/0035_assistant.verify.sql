@@ -1,5 +1,10 @@
 -- =============================================================================
--- Verification for 0029: assistant transcripts
+-- Verification for 0035: assistant transcripts
+--
+-- Named 0029 until 2026-09-10. The migration was drafted as 0029 on the `feature/chatbot` branch,
+-- but 0029-0034 had been taken by account activation and the offer chain by the time it merged,
+-- so commit cddf1bd renamed the MIGRATION to 0035 and left this file behind - sitting next to
+-- 0029_account_activation.verify.sql and describing a migration six numbers away.
 --
 -- The checks that carry the weight:
 --
