@@ -20,7 +20,7 @@ are all in this repository:
 | What a tool may be at all | `docs/adr/0020-runtime-ai-assistant.md` (**Proposed**, not Accepted) |
 | Which actions exist | `packages/authz/authz-matrix.yaml` — 50 actions |
 | Which fields a tool may return | `packages/authz/src/field-registry.ts` |
-| Which domains route | `infrastructure/db/migrations/0029_assistant_transcripts.sql` line 130 |
+| Which domains route | `infrastructure/db/migrations/0035_assistant_transcripts.sql` line 130 |
 | What the screens already do | `apps/api/src/*.ts`, `apps/web/app/(app)/*/page.tsx` |
 | Existing tools | `apps/api/src/assistant/tools-{me,leave,attendance}.ts` |
 
