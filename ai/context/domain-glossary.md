@@ -77,6 +77,18 @@ flag, which was an earlier name for this and must not appear in code.
 **Change class** - A, B or C; determines review ceremony.
 **Slice** - one unit of work, with acceptance criteria written as test names.
 
+## Assistant (ADR-0020)
+
+| Term | Means | Not to be confused with |
+|---|---|---|
+| **Assistant** | The in-product AI feature: the chat panel and the module behind it. Answers questions about data the asker may already see | "Bot", "chatbot", "copilot" - none of which appear in the schema or the API |
+| **Tool** | One entry in the assistant's fixed catalogue: a parameterised, read-only query bound to exactly one existing authz action | An API endpoint. A tool has no route of its own and adds no permission |
+| **Catalogue** | The whole set of tools. Filtered per actor by `assertCan` before the model ever sees it | The tools a given actor can reach, which is a subset and differs per request |
+| **Domain router** | The first model call, which narrows the catalogue to one domain before tool selection | The tool selection itself, which is the second call |
+| **Refusal code** | The closed-set reason an assistant turn produced no answer - `no_tool`, `not_permitted`, `forbidden_purpose`, `ambiguous`, `too_many_rows`, `timeout`, `no_rows` | An HTTP status. A refusal is a successful turn that declined |
+| **Answer** (assistant) | The sentence above a result table, written by the model **from the masked rows** since DEC-140. It states the figures that answer the question | The data itself. The table below it comes from Postgres and is the check on the answer, never derived from it. Before DEC-140 this was called **Narration** and was written from column names and a row count only |
+| **Suppressed** | What an aggregate returns when its group is smaller than k=5 (ADR-0017) | Zero, empty, or null - all of which state a fact about the data, which is the thing being withheld |
+
 ## Words we deliberately do not use
 
 | Avoid | Use | Why |
@@ -87,3 +99,6 @@ flag, which was an earlier name for this and must not appear in code.
 | "Timesheet" for attendance | Work log (effort) vs attendance (presence) | ADR-0015 - conflating them is how payroll becomes indefensible |
 | "Delete" for records | Archive, close, supersede | Transactional records are never deleted |
 | "Active employee" (in a query) | State the as-of date | A global `status = active` filter is what makes historical reporting impossible |
+| "Chatbot" / "copilot" / "bot" | **Assistant** | One name in the schema, the API, the UI and conversation. `assistant` is also the module and the table prefix |
+| "The AI knows X" | **A tool returned X** | The model never sees data. Saying it "knows" invites the belief that it remembers, which it must not and does not |
+| "Text-to-SQL" (of what shipped) | **Tool calling** | ADR-0020 rejected text-to-SQL. Calling this that would make the next reader look for a sandbox that does not exist |

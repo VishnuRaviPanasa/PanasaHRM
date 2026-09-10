@@ -7,6 +7,25 @@ import { api, hasRole, useData, type Actor } from '@/lib/api';
 import { Button, Skeleton } from '@/components/ui';
 import { LanguageSwitcher, useT, type MessageKey } from '@/lib/i18n';
 import { ArtLogo } from '@/components/logo';
+import dynamic from 'next/dynamic';
+
+/*
+ * The assistant is LAZY and does not server-render (ADR-0020).
+ *
+ * Nobody opens a page in order to use it, so it must not sit on the critical path of the page
+ * they did open. Imported statically it joined the shell's hydration payload, and the browser
+ * suite - which clicks as soon as the server-rendered text appears - started failing a different
+ * client-data check on each run while the baseline was clean three times out of three. That was
+ * the assistant delaying hydration, not a flaky suite, and shrinking the component would only
+ * have moved the edge rather than removed it.
+ *
+ * `ssr: false` because a launcher button in the corner has nothing useful to render on the
+ * server, and its whole state is client state.
+ */
+const Assistant = dynamic(
+  () => import('@/components/assistant').then((m) => m.Assistant),
+  { ssr: false },
+);
 
 /**
  * The application shell.
@@ -268,8 +287,9 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
      * pushes the bottom of the layout under the URL bar.
      *
      * Safe because nothing in the app relies on the DOCUMENT scroll: the only fixed-position
-     * elements are the document preview and the toast, both viewport-anchored and unaffected by
-     * which element owns the scrollbar. Checked before making the change, not assumed.
+     * elements are the document preview, the toast and the assistant launcher - all three
+     * viewport-anchored and unaffected by which element owns the scrollbar. Checked before
+     * making the change, not assumed, and re-checked when the assistant was added (ADR-0020).
      */
     <div className="flex h-dvh flex-col">
       <header className="z-30 shrink-0 border-b border-ink-200 bg-white/95 backdrop-blur">
@@ -346,6 +366,13 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
           <div className="mx-auto max-w-6xl">{children}</div>
         </main>
       </div>
+
+      {/*
+        * The assistant (ADR-0020). Inside the authenticated shell only, so it never renders on
+        * /login, and a sibling of the scrolling column rather than inside it - it is
+        * viewport-anchored and must not scroll with the page.
+        */}
+      <Assistant />
     </div>
   );
 }

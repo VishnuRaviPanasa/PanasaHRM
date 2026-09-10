@@ -2,10 +2,29 @@
 
 ## Status
 
-Proposed
+Superseded by ADR-0020
 
-> Only a human may set this to Accepted. Once Accepted this file is immutable and
-> `.claude/hooks/guard-adr.mjs` will refuse edits - supersede it with a new ADR instead.
+> **Superseded 2026-09-09 by [ADR-0020](0020-runtime-ai-assistant.md).** The premise of this
+> decision - *"The organization has no LLM API key and does not want one"* - no longer holds: a
+> key has been funded and `gpt-4o-mini` is available. This ADR anticipated that in its own
+> *Reconsider when*, and ADR-0020 adopts the release gate it named there (a 100% authorization
+> red-team score) unchanged.
+>
+> **Two things in this file are NOT superseded and remain in force**, because this ADR placed
+> them beyond later decisions and ADR-0020 inherited that limit rather than the power to lift it:
+>
+> 1. The **Decision** section's final paragraph - *"Forbidden regardless of any later decision:
+>    any AI input to hiring, promotion, compensation, performance rating, discipline or
+>    termination; attrition prediction on named individuals; productivity or sentiment scoring;
+>    and any AI write path to employee records."*
+> 2. The **amendment's operational bound** - *"The Claude Code harness is a development tool and
+>    must never be connected to a production database, or to any database containing real
+>    employee personal data."* That constrains how this repository is operated and has nothing
+>    to do with whether the product calls a model.
+>
+> Seams 1 and 2 were the load-bearing ones and both paid off: `scope()` returning a composable
+> predicate is what ADR-0020 is built on. Seam 3's reserved module name `ai` became `assistant`,
+> for the reason ADR-0020 records.
 
 ## Date
 

@@ -587,25 +587,41 @@ check('B09c an employee profile opens from the directory', !profileOpened?.err &
   arrived ? await evalJs('location.pathname') : (profileOpened?.err ?? 'never left the directory'));
 
 await goto(await evalJs('location.href'), 'document.body.innerText.includes("Work log")');
-const offered = await evalJs(`(() => {
-  const b = [...document.querySelectorAll('button')]
-    .find((x) => /^add work log$/i.test(x.textContent.trim()));
-  if (!b) return { err: 'the Add work log action is not on the profile' };
-  return { ok: true };
-})()`);
+
 /*
- * Open it by clicking until it is open. Two separate waits are needed and both were missing: the
- * button has to be hydrated before a click does anything, and the form then fetches this
- * employee's projects before it can render its selectors.
+ * CLICK, THEN CHECK IT LANDED - and retry if it did not.
+ *
+ * `goto` waits for TEXT, which arrives with the server-rendered HTML. A click dispatched between
+ * that moment and React hydrating does nothing at all: the button is in the DOM, `b.click()`
+ * succeeds, and no handler runs. The 2500ms sleep afterwards cannot help, because by then the
+ * click has already been swallowed.
+ *
+ * That race was always here and surfaced when the assistant (ADR-0020) made the shell's bundle
+ * marginally larger: the first run after a server restart failed these four checks and the next
+ * two runs passed. A gate that passes on the second try is not a gate, and "it was flaky" is how
+ * one gets ignored - so the wait is now on the OUTCOME rather than on elapsed time.
  */
-const formReady = await clickUntil(`(() => {
-  if (document.querySelector('#hr-wl-project')) return true;
-  [...document.querySelectorAll('button')]
-    .find((x) => /^add work log$/i.test(x.textContent.trim()))?.click();
-  return true;
-})()`, 'document.querySelector("#hr-wl-project")');
-check('B10 HR is offered "Add work log" on the employee profile', !offered?.err && formReady,
-  offered?.err ?? (formReady ? 'opened the form' : 'the form never finished loading'));
+let offered = null;
+for (let attempt = 1; attempt <= 3; attempt++) {
+  offered = await evalJs(`(() => {
+    const b = [...document.querySelectorAll('button')]
+      .find((x) => /^add work log$/i.test(x.textContent.trim()));
+    if (!b) return { err: 'the Add work log action is not on the profile' };
+    b.click();
+    return { ok: true };
+  })()`);
+  if (offered?.err) break;
+  // The form is open once its own fields exist. Poll for that, not for a duration.
+  let opened = false;
+  for (let i = 0; i < 20 && !opened; i++) {
+    await sleep(250);
+    opened = (await evalJs('!!document.querySelector("#hr-wl-project")')) === true;
+  }
+  if (opened) break;
+  if (attempt === 3) offered = { err: 'the form never opened after three clicks - not a race' };
+}
+check('B10 HR is offered "Add work log" on the employee profile', !offered?.err,
+  offered?.err ?? 'opened the form');
 
 check('B10b the form knows whose effort it is, so there is nothing to pick',
   (await evalJs('document.body.innerText.includes("Recording for")')) === true

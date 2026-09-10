@@ -79,27 +79,36 @@ export interface ResourceRef {
   readonly dataClass?: DataClass | undefined;
 }
 
-export type ResourceType =
-  | 'employee'
-  | 'employment'
-  | 'leave_request'
-  | 'leave_balance'
-  | 'attendance_day'
-  | 'attendance_punch'
-  | 'work_log'
-  | 'timesheet'
-  | 'task'
-  | 'project'
-  | 'project_effort'
-  | 'department'
-  | 'designation'
-  | 'team'
-  | 'employee_document'
-  | 'payslip'
-  | 'salary_annexure'
-  | 'org_config'
-  | 'audit_event'
-  | 'identity';
+/**
+ * The runtime list is the source of truth and `ResourceType` is DERIVED from it, so the two
+ * cannot drift. `ALL_ROLES` below is declared the other way round - a separate array annotated
+ * with the union - which catches an invalid entry but not a MISSING one. This shape catches
+ * both, and a test that needs to sweep every resource type (matrix.test.mjs does, to prove the
+ * field registry is default-deny at the TYPE level) needs the array to exist at runtime.
+ */
+export const ALL_RESOURCE_TYPES = [
+  'employee',
+  'employment',
+  'leave_request',
+  'leave_balance',
+  'attendance_day',
+  'attendance_punch',
+  'work_log',
+  'timesheet',
+  'task',
+  'project',
+  'project_effort',
+  'department',
+  'designation',
+  'team',
+  'employee_document',
+  'payslip',
+  'org_config',
+  'audit_event',
+  'identity',
+] as const;
+
+export type ResourceType = (typeof ALL_RESOURCE_TYPES)[number];
 
 /**
  * Which scope graph governs a resource type. ADR-0005: the two are ORTHOGONAL and neither

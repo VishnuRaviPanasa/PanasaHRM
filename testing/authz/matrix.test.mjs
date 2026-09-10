@@ -30,6 +30,7 @@ import { load } from 'js-yaml';
 import {
   ALL_ACTIONS, AuthorizationService, AuthzDeniedError, malformedActionNames, policyFor,
   registeredActions, actionsWithoutPolicy, assertPolicyCoverage,
+  ALL_RESOURCE_TYPES, registeredFields,
 } from '../../packages/authz/dist/index.js';
 
 const matrix = load(readFileSync('packages/authz/authz-matrix.yaml', 'utf8'));
@@ -326,8 +327,48 @@ console.log('\n5. fieldMask (default-deny)');
     'a legitimate list request is how bulk disclosure actually happens');
   check('exit_reason is absent from LIST responses', !inList.has('exit_reason'));
 
-  const unknownType = authz.fields(soleRoleCtx('hr_admin', 'HRA'), 'leave_request', { isSubject: false });
-  check('an unregistered RESOURCE yields no fields at all', unknownType.size === 0);
+  /*
+   * An unregistered RESOURCE must yield nothing at all - the type-level half of default-deny.
+   *
+   * This used to name `leave_request` as the example, and ADR-0020 registering that type broke
+   * the check. The lesson is the repo's own: a check must not borrow a fixture it does not own.
+   * So the type is now DISCOVERED rather than hardcoded, and the assertion below fails loudly if
+   * every type becomes registered, instead of quietly having nothing left to prove.
+   */
+  const unregistered = ALL_RESOURCE_TYPES.filter((t) => registeredFields(t).length === 0);
+  check('there is still an unregistered resource type to test with', unregistered.length > 0,
+    'every ResourceType is now registered - point this check at a deliberate fixture instead');
+
+  for (const t of unregistered) {
+    const none = authz.fields(soleRoleCtx('hr_admin', 'HRA'), t, { isSubject: false });
+    check(`an unregistered RESOURCE yields no fields at all (${t})`, none.size === 0);
+  }
+
+  /*
+   * ADR-0020: the assistant returns leave and attendance rows, so those types are registered now
+   * and their EXCLUSIONS have to be asserted, not assumed. Each of these was excluded for a
+   * reason recorded in data-inventory.md, and an unregistered column is unreachable by every
+   * role - which is what makes the exclusion structural rather than a promise in a tool's SELECT.
+   */
+  const punchSelf = authz.fields(soleRoleCtx('employee', 'E1'), 'attendance_punch', { isSubject: true });
+  const punchHr = authz.fields(soleRoleCtx('hr_admin', 'HRA'), 'attendance_punch', { isSubject: false });
+  for (const col of ['latitude', 'longitude', 'accuracy_m', 'distance_m']) {
+    check(`punch ${col} is unreachable by anyone, including the subject`,
+      !punchSelf.has(col) && !punchHr.has(col),
+      'data-inventory.md calls the coordinates the most sensitive thing in this system');
+  }
+  check('a punch still reports whether it matched a known office',
+    punchSelf.has('location_verified'));
+
+  const lrSelf = authz.fields(soleRoleCtx('employee', 'E1'), 'leave_request', { isSubject: true });
+  const lrMgr = authz.fields(soleRoleCtx('manager', 'M1'), 'leave_request', { isSubject: false });
+  const lrHr = authz.fields(soleRoleCtx('hr_admin', 'HRA'), 'leave_request', { isSubject: false });
+  check('the author can read back their own leave reason', lrSelf.has('reason'));
+  check('a manager does NOT get a leave reason through this path', !lrMgr.has('reason'),
+    'may reveal health or family circumstances - treat as SENSITIVE in any export');
+  check('hr_admin does NOT get a leave reason through this path', !lrHr.has('reason'));
+  check('leave dates and status remain readable to a manager',
+    lrMgr.has('from_date') && lrMgr.has('status'));
 }
 
 // ---------------------------------------------------------------------------

@@ -213,6 +213,56 @@ negative_cases:
     target: E1
     expect: deny
 
+  # ---- the assistant (ADR-0020) ------------------------------------------
+  # The assistant adds NO action. These pin the cells its tools depend on, because a catalogue
+  # entry is only as safe as the action it reuses, and a widening there would widen the chatbot
+  # silently - on every screen, to anyone who can type.
+
+  - id: assistant-finance-reaches-no-other-leave
+    pins: >
+      `finance` exists for payroll and holds no leave grant, so it must reach nobody else's leave
+      through the assistant. It DOES reach its own - every finance user is also an employee, and
+      the `employee` role admits isSelf - which is the point worth pinning: holding a privileged
+      role does not remove your ordinary rights, and it does not add somebody else's.
+      .
+      The first draft of this case asserted deny for the actor's OWN balance and failed. The
+      expectation was wrong, not the code (the same shape as DEC-062). Worth leaving recorded:
+      the `finance: deny` cell below describes the role IN ISOLATION, while these cases use
+      composite actors, because that is what real users are.
+    actor: FINANCE
+    action: leave.balance.read
+    target: E1
+    expect: deny
+
+  - id: assistant-auditor-reaches-no-leave
+    pins: >
+      Same for `auditor`, whose grant is the audit trail rather than the data it describes.
+    actor: AUDITOR
+    action: leave.request.read
+    target: E1
+    expect: deny
+
+  - id: assistant-entitlement-must-not-read-policy
+    pins: >
+      DEC-131. "How many casual leaves am I entitled to?" looks like a leave_policy lookup and
+      must never become one: ADR-0005(a) makes a policy row organisation-scoped, denied by
+      default, because reading one is a privilege. DEC-053 is the proof this matters - settings
+      let a MANAGER read company policy while the matrix said deny. The assistant answers
+      entitlement from the asker's own balance instead, and this cell is why it has to.
+    actor: E1
+    action: config.policy.read
+    target: E1
+    expect: deny
+
+  - id: assistant-entitlement-manager-also-denied
+    pins: >
+      The manager half of DEC-053, pinned separately because that is the role the regression
+      actually admitted.
+    actor: M1
+    action: config.policy.read
+    target: E1
+    expect: deny
+
 # -----------------------------------------------------------------------------
 # The full (role x action) matrix
 # -----------------------------------------------------------------------------
@@ -639,6 +689,25 @@ divergences:
       rbac-rules.md names reporting_relationship and reporting_closure_current. Neither exists;
       employment.manager_id with its effective-dated valid_period is the real edge, resolved by
       fn_reporting_subtree_asof. DEC-032.
+  - id: assistant-route-multiplexes-existing-actions
+    detail: >
+      ADR-0020 adds ONE route, POST /assistant/ask, and it appears nowhere in `actions:` because
+      it defines no action of its own. CLAUDE.md bars "adding a route without a corresponding
+      authz-matrix.yaml entry", and this divergence IS that entry: the route is a multiplexer,
+      and every tool in its catalogue reuses the action of the screen it mirrors
+      (leave_balance -> leave.balance.read, attendance_summary -> attendance.day.read, and so
+      on), resolved through assertCan per turn and again on execution.
+      .
+      Giving the assistant its own action would have been the mistake. It would create a second
+      permission covering the same data, and reports.ts already recorded where that leads: "Two
+      permission sets covering the same data drift apart, and the day they do, a report shows
+      what the detail view refuses - which is the worst possible direction for the mistake to
+      go." A chatbot that could out-reach the screen beside it is that failure with a text box
+      on the front.
+      .
+      The consequence to keep in mind when reading this file: every cell here is now also an
+      assistant cell. Widening one widens the chatbot, for every employee, on every screen.
+
   - id: team-membership-is-not-a-scope-graph
     detail: >
       Migration 0017 adds team_membership, effective-dated. It is deliberately NOT wired into

@@ -47,8 +47,9 @@
     "i18n:test": "node testing/demo/i18n.test.mjs",
     "bizdate:test": "node testing/demo/business-date.test.mjs",
     "browser:test": "node testing/demo/browser-verify.mjs",
-    "accounts:test": "node testing/demo/accounts.test.mjs",
-    "onboarding:test": "node testing/demo/onboarding.test.mjs"
+    "assistant:test": "node testing/demo/assistant-flow.test.mjs",
+    "assistant:redteam": "node testing/assistant/redteam.test.mjs",
+    "assistant:accuracy": "node testing/assistant/accuracy.test.mjs"
   },
   "devDependencies": {
     "prettier": "^3.3.3",

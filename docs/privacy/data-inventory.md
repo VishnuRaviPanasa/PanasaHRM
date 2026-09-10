@@ -238,6 +238,51 @@ appraisal is an HR and legal question, not an engineering one. **OR-25.**
 
 ---
 
+## Assistant transcripts — `assistant_conversation`, `assistant_message` (migration 0029)
+
+**This section describes the only data in the system that leaves the jurisdiction.** Everything
+else here is processed on one VM in Kochi; the question a user types into the assistant is sent
+to OpenAI (`api.openai.com`) to be routed and matched to a tool. That makes it a cross-border
+transfer, and it is the reason this section is more explicit than its size warrants.
+
+| Column | Class | Notes |
+|---|---|---|
+| `assistant_message.question_text` | `PERSONAL` | **Free text the user wrote, and the only column transmitted outside India.** It routinely names a colleague ("how much leave does Priya have left") and can disclose the asker's own circumstances by implication ("was I marked absent on the day of my surgery"). Classified PERSONAL rather than PUBLIC_INTERNAL for that reason, even though the system never asks for personal content |
+| `assistant_message.tool_args` | `PERSONAL` | May carry an employee number or a name fragment the user supplied. Never carries a result |
+| `assistant_conversation.user_id`, `.employee_id` | `PERSONAL` | Linkable identifiers. `security-guidelines.md`: an internal UUID "is still personal data under DPDP because it is linkable" |
+| `.route_domain`, `.tool_name`, `.refusal_code`, `.row_count`, `.model`, token counts, `.latency_ms` | `PUBLIC_INTERNAL` | Operational telemetry about the assistant, carrying no subject data. `row_count` is a count of rows the asker was already entitled to see |
+
+**No result row is ever stored.** There is no column that could hold one, and migration 0029's
+verify checks enumerate the table's columns and assert it. This is deliberate: storing answers
+would create a second copy of leave, attendance and work data in a table with different
+retention, different access rules and no field masking — and it would let a transcript replay
+disclose rows to a user whose roles had since been revoked, which ADR-0010 and DEC-042 exist to
+prevent.
+
+**What IS sent to the model, since DEC-140 (2026-09-09).** The question, the tool descriptions,
+the arguments the model chose, and — for the answer call — **the masked result rows themselves**.
+This reverses the original ADR-0020 §3 (*"no row of employee data is sent to the model"*) on the
+product owner's instruction, because an assistant that has not seen a figure cannot state one.
+
+The rows sent are **exactly the array the browser is shown in the same turn** — after `scope()` in
+SQL and after `maskList` — capped at 50 rows, 160 characters per value and 8000 characters per
+payload, with control characters stripped. So the provider sees no more than the asker does, and
+nothing crosses between two users of this system. It is still a **cross-border transfer of
+PERSONAL data**, and a materially larger one than a question: leave balances, attendance days and
+work records, for the asker and for anybody the asker may already see.
+
+`HRM_LLM_ANSWER_FROM_ROWS=false` returns the deployment to the original posture — column names
+and a row count only — without a code change. See ADR-0020 §3 as amended, and DEC-140.
+
+**Retention: 90 days*** from the message timestamp, after which the row is deleted outright
+rather than anonymised (a transcript stripped of its question is telemetry, and the telemetry
+columns can be kept separately if anyone ever wants them). Ninety days is long enough to build
+the `no_tool` backlog that ADR-0020 relies on and short enough that a chat log is not a standing
+disclosure risk. **Badged * in the DEC-020 sense — an engineering default, not a confirmed
+schedule.** As with every other retention figure in this file, nothing enforces it yet.
+
+---
+
 ## Known gaps, stated rather than hidden
 
 1. **No CI check.** The README promises a build-time failure for an unclassified column. Not
@@ -254,6 +299,17 @@ appraisal is an HR and legal question, not an engineering one. **OR-25.**
    both need HR or the legal contact to confirm or remove them, not a developer's judgement.
 6. **Every retention figure marked \* is an engineering placeholder** awaiting a confirmed
    retention schedule and a named legal owner (OR-03).
+7. **The assistant sends question text AND result rows to OpenAI, and nobody qualified has
+   reviewed that.** ADR-0020 originally reduced the transfer to the smallest thing that could
+   work - no row data, only what the user typed - and **DEC-140 gave that up deliberately** so the
+   assistant could answer in words. The transfer is now bounded (exactly what the asker is being
+   shown, 50 rows) rather than minimal, and "bounded is acceptable" is an engineering judgement
+   about a legal question, which is exactly what the header of this file says it is not authorised
+   to make. This gap is **larger than it was**, and it is the one to put in front of a legal owner
+   first.
+   Same class as OR-03, and it is the same missing person. The feature ships **disabled by
+   default** (`HRM_ASSISTANT_ENABLED`) so enabling it is a deliberate act by an operator rather
+   than a consequence of deploying.
 
 ---
 

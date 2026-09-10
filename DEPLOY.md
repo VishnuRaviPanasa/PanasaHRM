@@ -74,6 +74,67 @@ is blank** — an empty owner password would otherwise bring PostgreSQL up on tr
 empty. Changing it later does not change the role's password — `ALTER ROLE hrm PASSWORD …`, then
 update the file.
 
+### The AI assistant — wired, and switched OFF
+
+**The assistant (ADR-0020) is off in every deployment as it ships, and that is the correct
+setting today.** What changed (DEC-164) is that it is now *configurable from `prod.env`*: the
+`api` service declares the assistant variables and bind-mounts a key file, so switching it on is
+two lines in the env file rather than a compose rewrite. ADR-0020 deferred exactly one thing to
+the deployment — how the provider key reaches the container — and this is that decision, not a
+change of posture.
+
+**The key is a file on the VM, and only a file.** `security-guidelines.md` ("Secrets") requires
+file-backed secrets and bars plain environment variables, which `docker inspect`,
+`/proc/<pid>/environ`, child processes and one careless `console.log(process.env)` can all read.
+So `HRM_LLM_API_KEY` — the plain variable, local development only (DEC-129) — **is not declared
+on the container at all**, and cannot be passed by accident. `HRM_LLM_API_KEY_FILE` is fixed at
+`/run/secrets/hrm_llm_api_key` inside the container and is deliberately not a `prod.env`
+variable: it is the far half of the mount, and a second knob could only ever disagree with the
+first. A different mechanism — a swarm secret, a secrets agent — mounts its file at that same
+path. The key must never be committed and must never be a build arg; build args persist in image
+layers.
+
+```bash
+sudo mkdir -p /etc/panasa-hrm
+sudo install -o 1000 -g 1000 -m 0400 /dev/null /etc/panasa-hrm/llm-api-key
+sudo sh -c 'printf %s "sk-..." > /etc/panasa-hrm/llm-api-key'
+```
+
+`-o 1000` is not decoration: the API container runs as `node`, uid 1000 (`api.Dockerfile`), so a
+root-owned `0400` file is unreadable inside it. And the file must exist **before** the first
+`up`, because Docker creates a *directory* at a bind source that is missing. Both mistakes end
+the same way — a healthy-looking API that refuses every question — so `deploy.sh` checks for a
+non-empty, existing file and stops the deploy rather than letting either happen.
+
+| Variable | Required | Default |
+|---|---|---|
+| `HRM_ASSISTANT_ENABLED` | **yes** — the feature is off without it | `false` |
+| `HRM_LLM_KEY_HOST_PATH` | **yes**, when enabled — the path on the VM to the key file | none; `/dev/null` is mounted instead, which reads as no key |
+
+Optional, each with a working default — omit unless you mean to change one. A **blank** value is
+treated as absent, so an empty line cannot become a model named `""` or a zero-millisecond
+timeout:
+
+| Variable | Default |
+|---|---|
+| `HRM_LLM_MODEL` | `gpt-4o-mini` |
+| `HRM_LLM_BASE_URL` | `https://api.openai.com/v1` — point it at Azure OpenAI or a gateway |
+| `HRM_LLM_TIMEOUT_MS` | `12000` |
+| `HRM_LLM_ANSWER_FROM_ROWS` | `true` — the answer is written from the result rows, which means those rows are sent to the provider (DEC-140). Set `false` to send only column names and a row count; the assistant then introduces the table instead of answering in words |
+| `HRM_LLM_STREAM` | `true` — set `false` if the provider rejects `stream_options`; the API falls back on its own but pays a wasted attempt every turn (DEC-148) |
+
+To confirm whether it is on, `GET /api/assistant/capabilities` with a session reports `enabled`
+and a `disabledReason`. `HRM_ASSISTANT_ENABLED is not true` means `prod.env` leaves it `false` —
+with the stack as it ships, that is the expected answer. `no API key` means the switch arrived
+but the key did not: the mounted file is empty, unreadable, or is the `/dev/null` default.
+The API also states its assistant configuration on every boot
+(`docker compose … logs api | grep assistant`), naming which variable supplied the key and never
+the key itself.
+
+> **Do not enable this in production yet.** ADR-0020's release gate is a 100%
+> `assistant:redteam` score with no waiver. Having somewhere to put the key is not clearance to
+> switch it on.
+
 ### The session cookie
 
 `HRM_SECURE_COOKIES=true` drives **both** the cookie's `Secure` flag and its `__Host-` name prefix
