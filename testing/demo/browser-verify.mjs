@@ -1585,6 +1585,60 @@ const accepted = await clickUntil(`(() => {
 check('B31n and records that it was accepted, which frees the joiner for a fresh offer',
   accepted, `status=${await statusNow()}`);
 
+/*
+ * ================================================================ THE PHONE LAYOUT
+ *
+ * Both checks below cover defects that every other suite in this repo was blind to, and that the
+ * 2026-09-10 login/dashboard redesign found by taking screenshots at 390px.
+ *
+ * B32a THE HEADER SHOWED THE BRAND MARK TWICE below 640px. The shell rendered two lockups - a
+ *      compact one for phones and a full one for desktop - and switched between them by passing
+ *      `hidden sm:inline-flex` as ArtLogo's className. That lands TWO competing `display`
+ *      utilities of equal specificity on one element, and which one wins is decided by their
+ *      order in the generated stylesheet rather than in the class attribute. Tailwind emits
+ *      `inline-flex` after `hidden`, so on a phone both rendered. Invisible at every desktop
+ *      width, present since the sidebar shell was written, and not caught by anything.
+ *
+ * B32b THE DASHBOARD SCROLLED SIDEWAYS on a phone - 7px in English and 17px in Arabic, measured.
+ *      Small enough to look like nothing and enough to make the whole page rock horizontally
+ *      under a thumb. Asserted as `scrollWidth === clientWidth` on the document, in BOTH writing
+ *      directions, because the Arabic figure was the worse of the two and an English-only check
+ *      would have reported the page clean.
+ */
+console.log('\n3b. The phone layout');
+
+await send('Emulation.setDeviceMetricsOverride', {
+  width: 390, height: 844, deviceScaleFactor: 1, mobile: true,
+});
+
+const noOverflow = `(() => {
+  const de = document.documentElement;
+  return { scrollW: de.scrollWidth, clientW: de.clientWidth, over: de.scrollWidth - de.clientWidth };
+})()`;
+
+for (const [loc, label] of [['en', 'English'], ['ar', 'Arabic']]) {
+  await evalJs(`(() => { document.cookie = 'hrm_locale=${loc}; path=/; max-age=600'; return true; })()`);
+  await goto(`${WEB}/`, NAV_READY);
+  const o = await evalJs(noOverflow);
+  check(`B32b the dashboard does not scroll sideways at 390px (${label})`,
+    Number(o?.over) <= 0, `scrollWidth ${o?.scrollW} vs clientWidth ${o?.clientW}`);
+
+  if (loc === 'en') {
+    const marks = await evalJs(`(() => {
+      const imgs = [...document.querySelectorAll('header img')]
+        .filter((i) => /art-mark/.test(i.getAttribute('src') || ''))
+        .filter((i) => { const r = i.getBoundingClientRect(); return r.width > 4 && r.height > 4; });
+      return imgs.length;
+    })()`);
+    check('B32a exactly one brand mark is visible in the header at 390px',
+      Number(marks) === 1,
+      `${marks} visible - two means the compact and full lockups are both rendering`);
+  }
+}
+await evalJs(`(() => { document.cookie = 'hrm_locale=en; path=/; max-age=600'; return true; })()`);
+await send('Emulation.clearDeviceMetricsOverride');
+await shot('21-dashboard-phone');
+
 // ================================================================ no page threw
 console.log('\n4. Nothing threw while all of that happened');
 const realErrors = consoleErrors.filter((e) => !/favicon|ResizeObserver/i.test(e));

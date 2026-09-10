@@ -52,8 +52,29 @@ export class HrController {
         WHERE tp.status = 'submitted' AND ($2 = 'hr_admin' OR em.manager_id = $1)`,
       [me.employeeId, me.role]);
 
+    /*
+     * EVERY FIGURE ON THE LEAVE CARD IS DERIVED HERE, IN SQL, FROM THE LEDGER'S PROJECTION.
+     *
+     * `available` alone used to be sent, and the dashboard drew its progress bar as
+     * `value={available} max={12}` - a twelve-day entitlement hardcoded in the browser. That is
+     * wrong twice over: it is policy in the frontend (Must-Know Rule 11), and it is arithmetic
+     * about leave performed outside the ledger (ADR-0006). `12` also happened to be wrong for
+     * sick leave.
+     *
+     * So `taken`, `pending` and the entitlement are read from `leave_account` - the constrained
+     * projection whose `available` is a GENERATED column over exactly these terms - and the
+     * entitlement is summed by the database, not the browser. `lt.name` comes along because the
+     * dashboard was labelling the two types with hardcoded English strings.
+     *
+     * Additive: `available` keeps its name and meaning, so nothing that already reads this
+     * response changes.
+     */
     const myBalances = await this.db.rows(
-      `SELECT lt.code, coalesce(a.available, 0) AS available
+      `SELECT lt.code, lt.name,
+              coalesce(a.available, 0)                               AS available,
+              coalesce(a.taken, 0)                                   AS taken,
+              coalesce(a.pending, 0)                                 AS pending,
+              coalesce(a.accrued + a.carried_in + a.adjusted, 0)     AS entitled
          FROM leave_type lt
          LEFT JOIN leave_account a ON a.leave_type_id = lt.id
                                   AND a.employee_id = $1 AND a.leave_year = $2
@@ -104,19 +125,34 @@ export class HrController {
       `SELECT holiday_on, name, is_optional FROM holiday
         WHERE holiday_on >= fn_business_date() ORDER BY holiday_on LIMIT 4`);
 
+    /*
+     * THE ACTIVITY FEED NOW SENDS A KIND, NOT AN ENGLISH SENTENCE.
+     *
+     * `what` was assembled in SQL - `'applied for ' || r.working_days || ' day(s) ' || lt.code` -
+     * so the Arabic dashboard rendered an English sentence for every row. A database is the one
+     * layer that cannot know who is reading, and prose belongs where the locale is known.
+     *
+     * `kind` plus its parts travel instead, and the UI builds the sentence from the dictionary.
+     * `what` is KEPT, unchanged: it is part of a response other callers may already read, and
+     * removing it would be a breaking change for a presentational reason.
+     */
     const recentActivity = await this.db.rows(
       `SELECT * FROM (
          SELECT r.submitted_at AS at, e.full_name AS who,
-                'applied for ' || r.working_days || ' day(s) ' || lt.code AS what
+                'applied for ' || r.working_days || ' day(s) ' || lt.code AS what,
+                'leave_applied' AS kind, r.working_days AS amount, lt.code AS subject
            FROM leave_request r JOIN employee e ON e.id = r.employee_id
            JOIN leave_type lt ON lt.id = r.leave_type_id
          UNION ALL
          SELECT r.decided_at, m.full_name,
-                r.status || ' ' || e.full_name || '''s leave'
+                r.status || ' ' || e.full_name || '''s leave',
+                CASE WHEN r.status = 'approved' THEN 'leave_approved' ELSE 'leave_rejected' END,
+                NULL, e.full_name
            FROM leave_request r JOIN employee e ON e.id = r.employee_id
            JOIN employee m ON m.id = r.decided_by WHERE r.decided_at IS NOT NULL
          UNION ALL
-         SELECT tp.submitted_at, e.full_name, 'submitted a timesheet'
+         SELECT tp.submitted_at, e.full_name, 'submitted a timesheet',
+                'timesheet_submitted', NULL, NULL
            FROM timesheet_period tp JOIN employee e ON e.id = tp.employee_id
           WHERE tp.submitted_at IS NOT NULL
        ) x WHERE at IS NOT NULL ORDER BY at DESC LIMIT 6`);

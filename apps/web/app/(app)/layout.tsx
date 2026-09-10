@@ -2,11 +2,16 @@
 
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
-import { useEffect, useState } from 'react';
+import { useEffect, useState, type ComponentType } from 'react';
 import { api, hasRole, useData, type Actor } from '@/lib/api';
-import { Button, Skeleton } from '@/components/ui';
+import { Avatar, Skeleton } from '@/components/ui';
 import { LanguageSwitcher, useT, type MessageKey } from '@/lib/i18n';
 import { ArtLogo } from '@/components/logo';
+import {
+  IconBriefcase, IconBuilding, IconCalendar, IconChart, IconClock, IconFile, IconGrid,
+  IconInbox, IconLayers, IconListCheck, IconLogOut, IconReceipt, IconSettings, IconUser,
+  IconUserPlus, IconUsers, type IconProps,
+} from '@/components/icons';
 import dynamic from 'next/dynamic';
 
 /*
@@ -62,6 +67,35 @@ const Assistant = dynamic(
  * The key resolves through the dictionary, so `nav-shell.test.mjs` now checks the routes AND that
  * every key exists in both locales, which the literal version could not have checked at all.
  */
+/**
+ * WHICH GLYPH MARKS WHICH DESTINATION.
+ *
+ * Keyed by href and declared ABOVE `NAV_GROUPS` on purpose: `nav-shell.test.mjs` parses the
+ * NAV_GROUPS block for `href:` and `labelKey:` and fetches every route it finds, so the group
+ * definitions stay a clean list of routes and permissions with no presentation mixed in.
+ *
+ * A missing entry renders no glyph rather than throwing - a route added without an icon should
+ * still be reachable, and an icon is decoration on a row that already carries its own label.
+ */
+const NAV_ICON: Record<string, ComponentType<IconProps>> = {
+  '/': IconGrid,
+  '/profile': IconUser,
+  '/documents': IconFile,
+  '/attendance': IconClock,
+  '/leave': IconCalendar,
+  '/work': IconBriefcase,
+  '/timesheet': IconListCheck,
+  '/payslips': IconReceipt,
+  '/approvals': IconInbox,
+  '/team': IconUsers,
+  '/employees': IconUsers,
+  '/reports': IconChart,
+  '/onboarding': IconUserPlus,
+  '/organisation': IconBuilding,
+  '/masters/work-management': IconLayers,
+  '/settings': IconSettings,
+};
+
 interface NavItem { href: string; labelKey: MessageKey }
 interface NavGroup {
   id: string;
@@ -242,18 +276,18 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
    * by construction rather than by arithmetic.
    */
   const rowClass = (isActive: boolean) => [
-    'block truncate rounded-lg px-3 py-[7px] text-[13.5px] transition-colors',
+    'group flex items-center gap-2.5 rounded-lg px-3 py-2 text-[13.5px] transition-colors',
     isActive
-      ? 'bg-brand-100 font-semibold text-ink-900'
+      ? 'bg-brand-100 font-semibold text-ink-900 ring-1 ring-inset ring-brand-200'
       : 'font-medium text-ink-600 hover:bg-ink-100 hover:text-ink-900',
   ].join(' ');
 
   const navGroups = (idPrefix: string) => groups.map((g) => (
-    <div key={g.id} className={g.titleKey ? 'mt-4 first:mt-0' : 'first:mt-0'}>
+    <div key={g.id} className={g.titleKey ? 'mt-5 first:mt-0' : 'first:mt-0'}>
       {g.titleKey && (
         <h2
           id={`${idPrefix}-${g.id}`}
-          className="mb-1 px-3 text-[11px] font-semibold uppercase tracking-[0.07em] text-ink-400"
+          className="mb-1.5 px-3 text-[10.5px] font-semibold uppercase tracking-[0.09em] text-ink-500"
         >
           {t(g.titleKey)}
         </h2>
@@ -261,10 +295,17 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
       <ul {...(g.titleKey ? { 'aria-labelledby': `${idPrefix}-${g.id}` } : {})} className="space-y-0.5">
         {g.items.map((i) => {
           const on = active(i.href);
+          const Glyph = NAV_ICON[i.href];
           return (
             <li key={i.href}>
               <Link href={i.href} aria-current={on ? 'page' : undefined} className={rowClass(on)}>
-                {t(i.labelKey)}
+                {Glyph && (
+                  <Glyph
+                    size={17}
+                    className={on ? 'text-brand-700' : 'text-ink-400 transition-colors group-hover:text-ink-600'}
+                  />
+                )}
+                <span className="truncate">{t(i.labelKey)}</span>
               </Link>
             </li>
           );
@@ -292,40 +333,76 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
      * making the change, not assumed, and re-checked when the assistant was added (ADR-0020).
      */
     <div className="flex h-dvh flex-col">
+      {/*
+        * THE APPLICATION BAR.
+        *
+        * Three zones, in reading order: identity of the PRODUCT, then breathing space, then
+        * identity of the PERSON and the controls that belong to them. The account chip, the
+        * language switcher and sign-out are grouped together behind one hairline divider so they
+        * read as one cluster rather than three loose controls floating at the end of the bar.
+        *
+        * THERE IS NO NOTIFICATION BELL, deliberately. The brief asks for a notification area "if
+        * supported" - and it is not: there is no notifications endpoint and the `notifications`
+        * module is unbuilt. A bell that never lights up, or worse one that opens an empty panel,
+        * would be the one piece of this screen that lies about what the product does.
+        */}
       <header className="z-30 shrink-0 border-b border-ink-200 bg-white/95 backdrop-blur">
         <div className="flex items-center gap-3 px-4 py-2.5 sm:px-6">
-          <Link href="/" className="flex shrink-0 items-center gap-2" aria-label={t('app.name')}>
-            {/* The wordmark hides below sm; the disc alone still identifies the product. */}
-            <ArtLogo size={28} className="sm:hidden" compact />
-            <ArtLogo size={28} className="hidden sm:inline-flex" />
+          <Link
+            href="/"
+            className="flex shrink-0 items-center gap-2 rounded-lg py-0.5 transition-opacity hover:opacity-80"
+            aria-label={t('app.name')}
+          >
+            {/*
+              * The wordmark hides below sm; the disc alone still identifies the product.
+              *
+              * THE DISPLAY CLASS GOES ON A WRAPPER, not on ArtLogo. Passing `hidden
+              * sm:inline-flex` as its className produced "inline-flex ... hidden sm:inline-flex"
+              * on one element - two competing `display` utilities of equal specificity, decided
+              * by their order in the generated stylesheet rather than in the attribute. Tailwind
+              * emits `inline-flex` after `hidden`, so below 640px BOTH lockups rendered and the
+              * header showed the gold disc TWICE. Present since the sidebar shell was written and
+              * invisible at every desktop width; the phone screenshots are what caught it.
+              */}
+            <span className="sm:hidden"><ArtLogo size={28} compact /></span>
+            <span className="hidden sm:inline-flex"><ArtLogo size={28} /></span>
           </Link>
 
-          <div className="ms-auto flex items-center gap-2">
+          <div className="ms-auto flex items-center gap-1.5 sm:gap-2">
             {/* The name badge is where people look for their own record, so it goes there. */}
             <Link
               href="/profile"
-              className="flex items-center gap-2 rounded-lg px-1 py-0.5 hover:bg-ink-100"
+              className="flex items-center gap-2.5 rounded-lg p-1 transition-colors hover:bg-ink-100 sm:ps-2.5"
               aria-label={t('nav.profile')}
             >
               <span className="hidden text-end sm:block">
-                <span className="block text-[13px] font-medium leading-tight text-ink-900">{actor.name}</span>
-                <span className="block text-[12px] leading-tight text-ink-500">
+                <span className="block text-[13px] font-semibold leading-tight text-ink-900">{actor.name}</span>
+                <span className="block text-[11.5px] leading-tight text-ink-500">
                   {(actor.roles ?? [actor.role]).join(' · ').replace(/_/g, ' ')} · {actor.employeeNumber}
                 </span>
               </span>
-              <span aria-hidden className="grid h-8 w-8 place-items-center rounded-full bg-ink-200 text-[12.5px] font-semibold text-ink-700">
-                {actor.name.split(' ').map((p) => p[0]).slice(0, 2).join('')}
-              </span>
+              <Avatar name={actor.name} size={32} tone="dark" />
             </Link>
+
+            <span aria-hidden className="hidden h-6 w-px bg-ink-200 sm:block" />
+
             {/* Beside the account controls, which is where somebody looks for it. */}
             <LanguageSwitcher />
-            <Button variant="ghost" size="sm" onClick={signOut}>{t('app.signOut')}</Button>
+            <button
+              type="button"
+              onClick={signOut}
+              className="flex items-center gap-1.5 rounded-lg px-2 py-1.5 text-[13px] font-medium text-ink-600 transition-colors hover:bg-ink-100 hover:text-ink-900"
+            >
+              <IconLogOut size={16} className="flip-rtl" />
+              <span className="hidden sm:inline">{t('app.signOut')}</span>
+              <span className="sr-only sm:hidden">{t('app.signOut')}</span>
+            </button>
             <button
               type="button"
               onClick={() => setOpen((o) => !o)}
               aria-expanded={open}
               aria-controls="mobile-nav"
-              className="rounded-lg p-1.5 text-ink-600 hover:bg-ink-100 lg:hidden"
+              className="rounded-lg p-1.5 text-ink-600 transition-colors hover:bg-ink-100 lg:hidden"
             >
               <span className="sr-only">{t('app.menu')}</span>
               <svg width="20" height="20" viewBox="0 0 20 20" fill="none" aria-hidden>
@@ -350,9 +427,16 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
       {/* `min-h-0` lets this row shrink inside the column so its children can own the scroll. */}
       <div className="flex min-h-0 flex-1">
         {/* Its own scroll region, so a long report never pushes the navigation out of reach. */}
+        {/*
+          * `border-e`, not `border-r`. The divider belongs on the edge that FACES the content:
+          * the sidebar's right in English, its left in Arabic. `border-r` put it on the outer
+          * edge against the viewport in Arabic - a hairline in the wrong place, and one of the
+          * physical-property mistakes that `i18n.test.mjs` R1 exists to catch (it scans margins
+          * and text alignment, so a physical BORDER slipped through it).
+          */}
         <nav
           aria-label={t('app.mainContent')}
-          className="hidden w-56 shrink-0 overflow-y-auto border-r border-ink-200 px-2 py-4 lg:block"
+          className="hidden w-60 shrink-0 overflow-y-auto border-e border-ink-200 bg-white/60 px-3 py-5 lg:block"
         >
           {navGroups('snav')}
         </nav>

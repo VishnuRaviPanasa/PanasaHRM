@@ -115,6 +115,22 @@ export const useT = () => useI18n().t;
  */
 export const localeTag = (l: Locale): string => (l === 'ar' ? 'ar-AE-u-nu-latn' : 'en-IN');
 
+/**
+ * The office timezone, for rendering a TIMESTAMP as a wall-clock time.
+ *
+ * A punch is a `timestamptz`; showing one requires choosing a zone, and the honest choice for a
+ * single-site company in Kochi is the office's, not the reader's browser. It was already
+ * hardcoded inside `punch-card.tsx`; naming it once here means the punch list, the elapsed clock
+ * and the activity feed cannot disagree about what time something happened - which they would
+ * have the moment a second screen picked a different default.
+ *
+ * KNOWN LIMITATION, recorded rather than hidden: the authoritative value is
+ * `org_setting['company.timezone']`, which `fn_business_date()` already reads server-side. No
+ * endpoint exposes it to the browser yet, so this constant duplicates it. When one does, this is
+ * the single line to change - and a DATE never goes through here, only a timestamp.
+ */
+export const OFFICE_TZ = 'Asia/Kolkata';
+
 export function useFormat() {
   const { locale } = useI18n();
   const tag = localeTag(locale);
@@ -125,6 +141,32 @@ export function useFormat() {
       const [y, m, d] = iso.slice(0, 10).split('-').map(Number);
       return new Date(Date.UTC(y, m - 1, d)).toLocaleDateString(tag, {
         day: 'numeric', month: 'short', year: 'numeric', timeZone: 'UTC', ...opts,
+      });
+    },
+    /**
+     * A TIMESTAMP as a 24-hour wall-clock time in the office zone. 24-hour in both locales: an
+     * attendance record read beside a payroll export should not need am/pm disambiguated.
+     */
+    time: (at: string | Date | null | undefined) => {
+      if (!at) return '—';
+      /* A `Date` is accepted as well as an ISO string so that a caller holding a live clock does
+       * not have to serialise it first - `new Date().toISOString()` is banned in this codebase
+       * (S2 in business-date.test.mjs), because that expression is how four screens ended up a
+       * day behind before 05:30 IST. Nothing here derives a DATE; this formats a TIME. */
+      const d = at instanceof Date ? at : new Date(at);
+      if (Number.isNaN(d.getTime())) return '—';
+      return d.toLocaleTimeString(tag, {
+        hour: '2-digit', minute: '2-digit', hour12: false, timeZone: OFFICE_TZ,
+      });
+    },
+    /** A timestamp as "12 Sep, 14:30" - for a feed, where the day matters as much as the time. */
+    dateTime: (iso: string | null | undefined) => {
+      if (!iso) return '—';
+      const d = new Date(iso);
+      if (Number.isNaN(d.getTime())) return '—';
+      return d.toLocaleString(tag, {
+        day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit',
+        hour12: false, timeZone: OFFICE_TZ,
       });
     },
     number: (n: number) => new Intl.NumberFormat(tag).format(n),

@@ -50,6 +50,19 @@
 
   /* The near-black the brand uses for its banner, and here for the primary action. */
   --color-ink-950: #0f0f11;
+
+  /*
+   * ELEVATION IS A THREE-STEP SCALE, and it is deliberately shallow.
+   *
+   * The brief asked for no excessive shadows, and an HR screen is a dense one - twelve cards each
+   * casting a soft drop shadow reads as fog, not as depth. So a resting card is a HAIRLINE plus a
+   * 1px shadow that only separates it from the page, `md` belongs to something raised on purpose
+   * (a hover, a popover), and `lg` is for the one thing floating over everything else. The tint is
+   * ink rather than pure black so the shadow sits in the same warm family as the neutrals.
+   */
+  --shadow-card: 0 1px 2px rgba(23, 23, 26, 0.05);
+  --shadow-md: 0 1px 2px rgba(23, 23, 26, 0.05), 0 6px 16px -6px rgba(23, 23, 26, 0.14);
+  --shadow-lg: 0 12px 32px -8px rgba(23, 23, 26, 0.22), 0 2px 6px rgba(23, 23, 26, 0.08);
 }
 
 html {
@@ -62,6 +75,35 @@ body {
   font-family: ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
   font-size: 14px;
   line-height: 1.5;
+}
+
+/*
+ * Headings are set tighter than body copy and never hyphenated.
+ *
+ * At 14px base, a 21px page title set at the body's 1.5 line-height reads as loose and unowned -
+ * the single cheapest change that makes an interface look designed rather than defaulted is
+ * giving headings their own leading and a hair of negative tracking.
+ */
+h1, h2, h3 {
+  letter-spacing: -0.011em;
+  line-height: 1.25;
+  text-wrap: pretty;
+}
+
+/* Selection in the brand's own family rather than the browser's blue. */
+::selection {
+  background: var(--color-brand-200);
+  color: var(--color-ink-900);
+}
+
+/*
+ * Scrollbars: thin, neutral, and only as loud as they need to be. The shell gives the sidebar and
+ * the main column their own scroll regions, so on Windows two default-width scrollbars used to sit
+ * side by side in the middle of the page.
+ */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--color-ink-300) transparent;
 }
 
 /*
@@ -92,6 +134,98 @@ body {
   border-radius: 6px;
 }
 
+/*
+ * THE SIGN-IN PANEL'S GROUND.
+ *
+ * One gold radial at 8% over near-black, plus a fine 32px grid at 3.5%. That is the entire
+ * treatment, and the restraint is the point: the brief rules out excessive gradients and
+ * glassmorphism, and this is a login for an HR system rather than a launch page. What it buys is
+ * that the dark half stops reading as a flat black rectangle and starts reading as a surface.
+ *
+ * SYMMETRIC ON PURPOSE - the glow sits at the top CENTRE, not to one side, so the panel is
+ * identical in Arabic. A left-biased highlight would mirror under `dir="rtl"` and the two
+ * languages would not look like the same product.
+ *
+ * The grid is drawn with `background-image`, not an element, so it cannot be tabbed to, read by a
+ * screen reader, or intercept a click.
+ */
+.pitch {
+  background-color: var(--color-ink-950);
+  background-image:
+    radial-gradient(130% 70% at 50% -8%, rgba(255, 202, 6, 0.14), transparent 62%),
+    radial-gradient(80% 50% at 50% 108%, rgba(255, 255, 255, 0.04), transparent 70%),
+    linear-gradient(rgba(255, 255, 255, 0.04) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255, 255, 255, 0.04) 1px, transparent 1px);
+  background-size: 100% 100%, 100% 100%, 34px 34px, 34px 34px;
+}
+
+/*
+ * A single hairline of brand gold, used to mark a section without spending a colour on it.
+ * `border-inline-start` rather than `border-left`: in Arabic the mark belongs on the other side.
+ */
+.rule-brand {
+  border-inline-start: 2px solid var(--color-brand-500);
+}
+
+/*
+ * A GLYPH THAT POINTS "FORWARD" MUST TURN AROUND IN ARABIC.
+ *
+ * Logical properties handle boxes, margins and text alignment on their own, but they cannot
+ * rotate a drawing: a chevron pointing right still points right under `dir="rtl"`, where it now
+ * means "back". Every forward-pointing arrow in the UI carries this class.
+ *
+ * Written as a `[dir='rtl']` descendant rule rather than Tailwind's `rtl:` variant so that the
+ * idiom is one documented thing in one file - and so it keeps working regardless of which
+ * variants the Tailwind version in use happens to enable. Direction comes from `<html dir>`,
+ * which the server renders per locale.
+ */
+[dir='rtl'] .flip-rtl {
+  transform: scaleX(-1);
+}
+
+/*
+ * ENTRY MOTION: 12px and 260ms, once, on first paint.
+ *
+ * Enough to make the page feel assembled rather than dumped, short enough that nobody waits for
+ * it. `both` fill so the element is never briefly visible in its pre-animation position, and the
+ * stagger is applied inline by the caller where it is worth having.
+ */
+@keyframes hrm-rise {
+  from { opacity: 0; transform: translateY(12px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.rise {
+  animation: hrm-rise 260ms cubic-bezier(0.22, 0.61, 0.36, 1) both;
+}
+
+/*
+ * Interactive card: a resting hairline that darkens and lifts on hover.
+ *
+ * The lift is 1px of translation. A card that jumps 4px on hover in a grid of eight cards makes
+ * the whole grid feel unstable, and it also invites a mouse-out/mouse-in flicker loop at the
+ * boundary.
+ */
+.lift {
+  transition: box-shadow 160ms ease, border-color 160ms ease, transform 160ms ease;
+}
+.lift:hover {
+  border-color: var(--color-ink-300);
+  box-shadow: var(--shadow-md);
+  transform: translateY(-1px);
+}
+
+/*
+ * REDUCED MOTION IS HONOURED BY REMOVING MOTION, NOT BY REMOVING THE DESIGN.
+ *
+ * `.rise` keeps its end state (so nothing is invisible), `.lift` keeps its shadow and border
+ * change (which carry the hover affordance) and loses only the translation, and the skeleton
+ * stops pulsing. A blanket `animation: none` on `.rise` with a `from` opacity of 0 would have
+ * left the whole page blank for anybody with the setting on - the exact failure this block exists
+ * to avoid.
+ */
 @media (prefers-reduced-motion: reduce) {
   .skeleton { animation: none; }
+  .rise { animation: none; }
+  .lift { transition: box-shadow 160ms ease, border-color 160ms ease; }
+  .lift:hover { transform: none; }
 }
